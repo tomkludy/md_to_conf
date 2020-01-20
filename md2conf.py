@@ -604,6 +604,19 @@ def upload_attachment(page_id, file, comment):
     return True
 
 
+def resolve_refs(html):
+    refs = re.findall('(href="([^"]+)")', html)
+    if refs:
+        for ref in refs:
+            if not ref[1].startswith(('http', '/')) and ref[1].endswith('.md'):
+                with open(os.path.dirname(MARKDOWN_FILE) + "/" + ref[1], 'r') as mdfile:
+                    title = mdfile.readline().lstrip('#').strip()
+                page = get_page(title)
+                if page:
+                    html = html.replace(ref[0], "href=\"" + page.link + "\"")
+    return html
+
+
 def main():
     """
     Main program
@@ -637,6 +650,8 @@ def main():
         html = add_contents(html)
 
     html = process_refs(html)
+
+    html = resolve_refs(html)
 
     LOGGER.debug('html: %s', html)
 
