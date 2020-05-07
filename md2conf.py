@@ -31,7 +31,6 @@ LOGGER = logging.getLogger(__name__)
 
 # ArgumentParser to parse arguments and options
 PARSER = argparse.ArgumentParser()
-PARSER.add_argument("markdownFile", help="Full path of the markdown file to convert and upload.")
 PARSER.add_argument('spacekey',
                     help="Confluence Space key for the page. If omitted, will use user space.")
 PARSER.add_argument('-u', '--username', help='Confluence username if $CONFLUENCE_USERNAME not set.')
@@ -41,8 +40,6 @@ PARSER.add_argument('-o', '--orgname',
                          'e.g. https://XXX.atlassian.net/wiki'
                          'If orgname contains a dot, considered as the fully qualified domain name.'
                          'e.g. https://XXX')
-PARSER.add_argument('-a', '--ancestor',
-                    help='Parent page under which page will be created or moved.')
 PARSER.add_argument('-t', '--attachment', nargs='+',
                     help='Attachment(s) to upload to page. Paths relative to the markdown file.')
 PARSER.add_argument('-c', '--contents', action='store_true', default=False,
@@ -58,7 +55,6 @@ PARSER.add_argument('-l', '--loglevel', default='INFO',
 PARSER.add_argument('-s', '--simulate', action='store_true', default=False,
                     help='Use this option to only show conversion result.')
 
-
 ARGS = PARSER.parse_args()
 
 # Assign global variables
@@ -66,12 +62,14 @@ try:
     # Set log level
     LOGGER.setLevel(getattr(logging, ARGS.loglevel.upper(), None))
 
-    MARKDOWN_FILE = ARGS.markdownFile
+    DOCUMENTATION_DIRECTORY = '..\\dagrofa-merkur\\docs\\'
+    DOCUMENTATION_TEMPLATE = 'template.md'
+    LOG_FILE = 'logs\\logs.txt'
+
     SPACE_KEY = ARGS.spacekey
     USERNAME = os.getenv('CONFLUENCE_USERNAME', ARGS.username)
     API_KEY = os.getenv('CONFLUENCE_API_KEY', ARGS.apikey)
     ORGNAME = os.getenv('CONFLUENCE_ORGNAME', ARGS.orgname)
-    ANCESTOR = ARGS.ancestor
     NOSSL = ARGS.nossl
     DELETE = ARGS.delete
     SIMULATE = ARGS.simulate
@@ -85,10 +83,6 @@ try:
 
     if API_KEY is None:
         LOGGER.error('Error: API key not specified by environment variable or option.')
-        sys.exit(1)
-
-    if not os.path.exists(MARKDOWN_FILE):
-        LOGGER.error('Error: Markdown file: %s does not exist.', MARKDOWN_FILE)
         sys.exit(1)
 
     if SPACE_KEY is None:
@@ -111,6 +105,7 @@ except Exception as err:
     LOGGER.error('\nFailed to process command line arguments. Exiting.')
     sys.exit(1)
 
+
 def convert_comment_block(html):
     """
     Convert markdown code bloc to Confluence hidden comment
@@ -124,6 +119,7 @@ def convert_comment_block(html):
     html = html.replace('<!--', open_tag).replace('-->', close_tag)
 
     return html
+
 
 def convert_code_block(html):
     """
@@ -198,6 +194,7 @@ def convert_info_macros(html):
 
     return html
 
+
 def convert_doctoc(html):
     """
     Convert doctoc to confluence macro
@@ -221,6 +218,7 @@ def convert_doctoc(html):
     html = re.sub('\<\!\-\- START doctoc.*END doctoc \-\-\>', toc_tag, html, flags=re.DOTALL)
 
     return html
+
 
 def strip_type(tag, tagtype):
     """
@@ -330,15 +328,16 @@ def get_page(title):
 
 
 # Scan for images and upload as attachments if found
-def add_images(page_id, html):
+def add_images(page_id, html, filepath):
     """
     Scan for images and upload as attachments if found
 
     :param page_id: Confluence page id
     :param html: html string
+    :param filepath: markdown file full path
     :return: html with modified image reference
     """
-    source_folder = os.path.dirname(os.path.abspath(MARKDOWN_FILE))
+    source_folder = os.path.dirname(os.path.abspath(filepath))
 
     for tag in re.findall('<img(.*?)\/>', html):
         rel_path = re.search('src="(.*?)"', tag).group(1)
@@ -364,43 +363,45 @@ def add_contents(html):
     :return: modified html string
     """
     contents_markup = '<ac:structured-macro ac:name="toc">\n<ac:parameter ac:name="printable">' \
-                     'true</ac:parameter>\n<ac:parameter ac:name="style">disc</ac:parameter>'
+                      'true</ac:parameter>\n<ac:parameter ac:name="style">disc</ac:parameter>'
     contents_markup = contents_markup + '<ac:parameter ac:name="maxLevel">5</ac:parameter>\n' \
-                                      '<ac:parameter ac:name="minLevel">1</ac:parameter>'
+                                        '<ac:parameter ac:name="minLevel">1</ac:parameter>'
     contents_markup = contents_markup + '<ac:parameter ac:name="class">rm-contents</ac:parameter>\n' \
-                                      '<ac:parameter ac:name="exclude"></ac:parameter>\n' \
-                                      '<ac:parameter ac:name="type">list</ac:parameter>'
+                                        '<ac:parameter ac:name="exclude"></ac:parameter>\n' \
+                                        '<ac:parameter ac:name="type">list</ac:parameter>'
     contents_markup = contents_markup + '<ac:parameter ac:name="outline">false</ac:parameter>\n' \
-                                      '<ac:parameter ac:name="include"></ac:parameter>\n' \
-                                      '</ac:structured-macro>'
+                                        '<ac:parameter ac:name="include"></ac:parameter>\n' \
+                                        '</ac:structured-macro>'
 
     html = contents_markup + '\n' + html
     return html
 
 
-def add_attachments(page_id, files):
+def add_attachments(page_id, files, filepath):
     """
     Add attachments for an array of files
 
     :param page_id: Confluence page id
     :param files: list of files to attach to the given Confluence page
+    :param filepath: markdown file full path
     :return: None
     """
-    source_folder = os.path.dirname(os.path.abspath(MARKDOWN_FILE))
+    source_folder = os.path.dirname(os.path.abspath(filepath))
 
     if files:
         for file in files:
             upload_attachment(page_id, os.path.join(source_folder, file), '')
 
 
-def create_page(title, body, ancestors):
+def create_page(title, body, ancestors, filepath):
     """
     Create a new page
 
     :param title: confluence page title
     :param body: confluence page content
     :param ancestors: confluence page ancestor
-    :return:
+    :param filepath: markdown file full path
+    :return: created page id
     """
     LOGGER.info('Creating page...')
 
@@ -411,16 +412,16 @@ def create_page(title, body, ancestors):
     session.headers.update({'Content-Type': 'application/json'})
 
     new_page = {'type': 'page', \
-               'title': title, \
-               'space': {'key': SPACE_KEY}, \
-               'body': { \
-                   'storage': { \
-                       'value': body, \
-                       'representation': 'storage' \
-                       } \
-                   }, \
-               'ancestors': ancestors \
-               }
+                'title': title, \
+                'space': {'key': SPACE_KEY}, \
+                'body': { \
+                    'storage': { \
+                        'value': body, \
+                        'representation': 'storage' \
+                        } \
+                    }, \
+                'ancestors': ancestors \
+                }
 
     LOGGER.debug("data: %s", json.dumps(new_page))
 
@@ -444,10 +445,11 @@ def create_page(title, body, ancestors):
         img_check = re.search('<img(.*?)\/>', body)
         if img_check or ATTACHMENTS:
             LOGGER.info('\tAttachments found, update procedure called.')
-            update_page(page_id, title, body, version, ancestors, ATTACHMENTS)
+            update_page(page_id, title, body, version, ancestors, ATTACHMENTS, filepath)
         else:
             if GO_TO_PAGE:
                 webbrowser.open(link)
+        return page_id
     else:
         LOGGER.error('Could not create page.')
         sys.exit(1)
@@ -476,7 +478,7 @@ def delete_page(page_id):
         LOGGER.error('Page %s could not be deleted.', page_id)
 
 
-def update_page(page_id, title, body, version, ancestors, attachments):
+def update_page(page_id, title, body, version, ancestors, attachments, filepath):
     """
     Update a page
 
@@ -486,13 +488,14 @@ def update_page(page_id, title, body, version, ancestors, attachments):
     :param version: confluence page version
     :param ancestors: confluence page ancestor
     :param attachments: confluence page attachments
+    :param filepath: markdown file full path
     :return: None
     """
     LOGGER.info('Updating page...')
 
     # Add images and attachments
-    body = add_images(page_id, body)
-    add_attachments(page_id, attachments)
+    body = add_images(page_id, body, filepath)
+    add_attachments(page_id, attachments, filepath)
 
     url = '%s/rest/api/content/%s' % (CONFLUENCE_API_URL, page_id)
 
@@ -513,7 +516,7 @@ def update_page(page_id, title, body, version, ancestors, attachments):
             }, \
         "version": { \
             "number": version + 1, \
-            "minorEdit" : True \
+            "minorEdit": True \
             }, \
         'ancestors': ancestors \
         }
@@ -601,6 +604,74 @@ def upload_attachment(page_id, file, comment):
     return True
 
 
+def remove_collapsible_headings(read):
+    read = read.replace('<details>', '')
+    read = read.replace('</details>', '')
+    read = read.replace('<summary>', '')
+    read = read.replace('</summary>', '')
+    return read
+
+
+def get_html(filepath):
+    with codecs.open(filepath, 'r', 'utf-8') as mdfile:
+        read = mdfile.read()
+        read = remove_collapsible_headings(read)
+        html = markdown.markdown(read, extensions=['markdown.extensions.tables',
+                                                   'markdown.extensions.fenced_code',
+                                                   'markdown.extensions.sane_lists'])
+    html = '\n'.join(html.split('\n')[1:])
+    html = add_note(html)
+    html = convert_info_macros(html)
+    html = convert_comment_block(html)
+    html = convert_code_block(html)
+    if CONTENTS:
+        html = add_contents(html)
+    html = process_refs(html)
+    LOGGER.debug('html: %s', html)
+
+    return html
+
+
+def add_note(html):
+    warning = '<p>~!This is a generated file. Any modifications to it will be lost upon next update. Please use the documentation files in the project repository. !~</p>'
+    html = warning + html
+    return html
+
+
+def get_title(filepath):
+    with open(filepath, 'r') as mdfile:
+        title = mdfile.readline().lstrip('#').strip()
+        mdfile.seek(0)
+    LOGGER.info('Title:\t\t%s', title)
+    return title
+
+
+def get_ancestor_doc_file(directory):
+    return directory + directory.split('\\')[-2] + '.md'
+
+
+def create_ancestor_page(page, directory, ancestor):
+    parent_page = get_page(page)
+    ancestor_doc_file = get_ancestor_doc_file(directory)
+    title = get_title(ancestor_doc_file)
+    html = get_html(ancestor_doc_file)
+    if SIMULATE:
+        log_html(html)
+        return []
+    elif parent_page:
+        update_page(parent_page.id, title, html, parent_page.version, ancestor, ATTACHMENTS, ancestor_doc_file)
+        ancestors = [{'type': 'page', 'id': parent_page.id}]
+    else:
+        page_id = create_page(title, html, ancestor, ancestor_doc_file)
+        ancestors = [{'type': 'page', 'id': page_id}]
+    return ancestors
+
+
+def log_html(html):
+    log_file = open(LOG_FILE, 'a')
+    log_file.write(html)
+
+
 def main():
     """
     Main program
@@ -611,59 +682,42 @@ def main():
     LOGGER.info('\t\tMarkdown to Confluence Upload Tool')
     LOGGER.info('\t\t----------------------------------\n\n')
 
-    LOGGER.info('Markdown file:\t%s', MARKDOWN_FILE)
     LOGGER.info('Space Key:\t%s', SPACE_KEY)
 
-    with open(MARKDOWN_FILE, 'r') as mdfile:
-        title = mdfile.readline().lstrip('#').strip()
-        mdfile.seek(0)
+    doc_ancestors = create_ancestor_page(get_title(get_ancestor_doc_file(DOCUMENTATION_DIRECTORY)), DOCUMENTATION_DIRECTORY, [])
 
-    LOGGER.info('Title:\t\t%s', title)
+    directories = []
+    for name in os.listdir(DOCUMENTATION_DIRECTORY):
+        if os.path.isdir(DOCUMENTATION_DIRECTORY + name):
+            directories.append(name)
 
-    with codecs.open(MARKDOWN_FILE, 'r', 'utf-8') as mdfile:
-        html = markdown.markdown(mdfile.read(), extensions=['markdown.extensions.tables',
-                                                       'markdown.extensions.fenced_code'])
+    for directory in directories:
+        dir_ancestors = create_ancestor_page(get_title(get_ancestor_doc_file(directory)), directory, doc_ancestors)
 
-    html = '\n'.join(html.split('\n')[1:])
+        for file in os.scandir(directory):
+            if file.path.endswith('.md') and not (file.path.endswith(DOCUMENTATION_TEMPLATE) or file.path.endswith(get_ancestor_doc_file(directory))):
+                LOGGER.info('Markdown file:\t%s', file.name)
+                title = get_title(file.path)
 
-    html = convert_info_macros(html)
-    html = convert_comment_block(html)
-    html = convert_code_block(html)
+                LOGGER.info('Checking if Atlas page exists...')
+                page = get_page(title)
+                if DELETE and page:
+                    delete_page(page.id)
+                    sys.exit(1)
 
-    if CONTENTS:
-        html = add_contents(html)
-
-    html = process_refs(html)
-
-    LOGGER.debug('html: %s', html)
-
+                html = get_html(file.path)
+                if SIMULATE:
+                    log_html(html)
+                else:
+                    if page:
+                        update_page(page.id, title, html, page.version, dir_ancestors, ATTACHMENTS, file.path)
+                    else:
+                        create_page(title, html, dir_ancestors, file.path)
+                continue
     if SIMULATE:
-        LOGGER.info("Simulate mode is active - stop processing here.")
-        sys.exit(0)
-
-    LOGGER.info('Checking if Atlas page exists...')
-    page = get_page(title)
-
-    if DELETE and page:
-        delete_page(page.id)
-        sys.exit(1)
-
-    if ANCESTOR:
-        parent_page = get_page(ANCESTOR)
-        if parent_page:
-            ancestors = [{'type': 'page', 'id': parent_page.id}]
-        else:
-            LOGGER.error('Error: Parent page does not exist: %s', ANCESTOR)
-            sys.exit(1)
+        LOGGER.info("Simulate mode completed successfully.")
     else:
-        ancestors = []
-
-    if page:
-        update_page(page.id, title, html, page.version, ancestors, ATTACHMENTS)
-    else:
-        create_page(title, html, ancestors)
-
-    LOGGER.info('Markdown Converter completed successfully.')
+        LOGGER.info('Markdown Converter completed successfully.')
 
 
 if __name__ == "__main__":
