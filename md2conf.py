@@ -313,27 +313,22 @@ def get_page(title):
     return False
 
 
-def get_child_page_titles(page_id):
+def get_child_page_ids(page_id):
     """
      Retrieve details of the child pages by page id
 
     :param page_id: page id
-    :return: title of child pages
+    :return: ids of child pages
     """
     LOGGER.info('\tRetrieving information of original child pages: %s', page_id)
-    pages = get_child_pages_recursively(page_id)
+    page_ids = get_child_pages_recursively(page_id)
 
-    for page in pages:
-        page_id = page.page_id
+    for page_id in page_ids:
         child_pages = get_child_pages_recursively(page_id)
         if child_pages:
-            pages.extend(child_pages)
+            page_ids.extend(child_pages)
 
-    titles = []
-    for page in pages:
-        titles.append(page.title)
-
-    return titles
+    return page_ids
 
 
 def get_child_pages_recursively(page_id):
@@ -348,13 +343,11 @@ def get_child_pages_recursively(page_id):
     data = response.json()
     LOGGER.debug("data: %s", str(data))
 
-    pages = []
+    page_ids = []
     for result in data[u'results']:
-        child_page = collections.namedtuple('ChildPage', ['page_id', 'title'])
-        page = child_page(result[u'id'], result[u'title'])
-        pages.append(page)
+        page_ids.append(result[u'id'])
 
-    return pages
+    return page_ids
 
 
 def check_for_errors(response):
@@ -757,14 +750,19 @@ def main():
     LOGGER.info('Space Key:\t%s', SPACE_KEY)
 
     doc_file = get_landing_page_doc_file(DOCUMENTATION_ROOT)
-    create_dir_landing_page(doc_file, DOCUMENTATION_ROOT, [])
-
-    doc_landing_page = get_page(get_title(doc_file))
+    doc_landing_page_title = get_title(doc_file)
+    doc_landing_page = get_page(doc_landing_page_title)
     original_child_pages = []
     if doc_landing_page:
-        get_child_page_titles(doc_landing_page.id)
-
+        original_child_pages.append(doc_landing_page_title)
+        original_child_pages = get_child_page_ids(doc_landing_page.id)
     LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
+
+    [delete_page(page_id) for page_id in original_child_pages]
+    if DELETE:
+        sys.exit(1)
+
+    create_dir_landing_page(doc_file, DOCUMENTATION_ROOT, [])
 
     directories = get_subfolders_recursively(DOCUMENTATION_ROOT)
 
@@ -779,9 +777,6 @@ def main():
 
                 LOGGER.info('Checking if Atlas page exists...')
                 page = get_page(title)
-                if DELETE and page:
-                    delete_page(page.id)
-                    sys.exit(1)
 
                 html = get_html(file.path)
                 if SIMULATE:
@@ -792,6 +787,7 @@ def main():
                     else:
                         create_page(title, html, dir_landing_as_ancestor, file.path)
                 continue
+
     if SIMULATE:
         LOGGER.info("Simulate mode completed successfully.")
     else:
