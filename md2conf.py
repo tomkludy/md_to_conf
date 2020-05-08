@@ -62,7 +62,7 @@ try:
     # Set log level
     LOGGER.setLevel(getattr(logging, ARGS.loglevel.upper(), None))
 
-    DOCUMENTATION_DIRECTORY = '..\\dagrofa-merkur\\docs\\'
+    DOCUMENTATION_ROOT = '..\\dagrofa-merkur\\docs'
     DOCUMENTATION_TEMPLATE = 'template.md'
     LOG_FILE = 'logs\\logs.txt'
 
@@ -313,7 +313,7 @@ def get_page(title):
     return False
 
 
-def get_child_pages_recursively(page_id):
+def get_child_page_titles(page_id):
     """
      Retrieve details of the child pages by page id
 
@@ -321,11 +321,11 @@ def get_child_pages_recursively(page_id):
     :return: title of child pages
     """
     LOGGER.info('\tRetrieving information of original child pages: %s', page_id)
-    pages = get_child_pages(page_id)
+    pages = get_child_pages_recursively(page_id)
 
     for page in pages:
         page_id = page.page_id
-        child_pages = get_child_pages(page_id)
+        child_pages = get_child_pages_recursively(page_id)
         if child_pages:
             pages.extend(child_pages)
 
@@ -336,7 +336,7 @@ def get_child_pages_recursively(page_id):
     return titles
 
 
-def get_child_pages(page_id):
+def get_child_pages_recursively(page_id):
     url = '%s/rest/api/content/search?cql=parent=%s' % (CONFLUENCE_API_URL, urllib.parse.quote_plus(page_id))
 
     session = requests.Session()
@@ -690,25 +690,31 @@ def get_title(filepath):
     return title
 
 
-def get_ancestor_doc_file(directory):
-    return DOCUMENTATION_DIRECTORY + directory.split('\\')[-2] + '.md'
+def get_landing_page_doc_file(directory):
+    root = os.path.abspath(DOCUMENTATION_ROOT)
+    md_file = directory.split('\\')[-1] + '.md'
+    return root + '\\' + md_file
 
 
-def create_ancestor_page(page, directory, ancestor):
-    parent_page = get_page(page)
-    ancestor_doc_file = get_ancestor_doc_file(directory)
-    title = get_title(ancestor_doc_file)
-    html = get_html(ancestor_doc_file)
+def get_page_as_ancestor(page_id):
+    return [{'type': 'page', 'id': page_id}]
+
+
+def create_dir_landing_page(dir_landing_page_file, directory, ancestors):
+    landing_page_title = get_title(dir_landing_page_file)
+    parent_page = get_page(landing_page_title)
+    landing_page_doc_file = get_landing_page_doc_file(directory)
+    html = get_html(landing_page_doc_file)
     if SIMULATE:
         log_html(html)
         return []
     elif parent_page:
-        update_page(parent_page.id, title, html, parent_page.version, ancestor, ATTACHMENTS, ancestor_doc_file)
-        ancestors = [{'type': 'page', 'id': parent_page.id}]
+        update_page(parent_page.id, landing_page_title, html, parent_page.version, ancestors, [], landing_page_doc_file)
+        page_as_ancestor = get_page_as_ancestor(parent_page.id)
     else:
-        page_id = create_page(title, html, ancestor, ancestor_doc_file)
-        ancestors = [{'type': 'page', 'id': page_id}]
-    return ancestors
+        page_id = create_page(landing_page_title, html, ancestors, landing_page_doc_file)
+        page_as_ancestor = get_page_as_ancestor(page_id)
+    return page_as_ancestor
 
 
 def log_html(html):
@@ -724,6 +730,20 @@ def get_subfolders_recursively(dirname):
     return subfolders
 
 
+def create_dir_landing_page_recursively(dir_landing_page_file, directory):
+    ancestor_landing_page_dir = os.path.abspath(os.path.join(directory, os.pardir))
+    ancestor_landing_page_file = get_landing_page_doc_file(ancestor_landing_page_dir)
+    ancestor_landing_page_title = get_title(ancestor_landing_page_file)
+    ancestor_page = get_page(ancestor_landing_page_title)
+
+    if ancestor_page:
+        page_as_ancestor = create_dir_landing_page(dir_landing_page_file, directory, get_page_as_ancestor(ancestor_page.id))
+    else:
+        page_as_ancestor = create_dir_landing_page_recursively(ancestor_landing_page_file, ancestor_landing_page_dir)
+
+    return page_as_ancestor
+
+
 def main():
     """
     Main program
@@ -736,20 +756,24 @@ def main():
 
     LOGGER.info('Space Key:\t%s', SPACE_KEY)
 
-    doc_file = get_ancestor_doc_file(DOCUMENTATION_DIRECTORY)
-    original_child_pages = get_child_pages_recursively(get_page(get_title(doc_file)).id)
-    LOGGER.info(original_child_pages)
+    doc_file = get_landing_page_doc_file(DOCUMENTATION_ROOT)
+    create_dir_landing_page(doc_file, DOCUMENTATION_ROOT, [])
 
-    doc_ancestors = create_ancestor_page(get_title(doc_file), DOCUMENTATION_DIRECTORY, [])
+    doc_landing_page = get_page(get_title(doc_file))
+    original_child_pages = []
+    if doc_landing_page:
+        get_child_page_titles(doc_landing_page.id)
 
-    directories = get_subfolders_recursively(DOCUMENTATION_DIRECTORY)
-    LOGGER.info(directories)
+    LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
+
+    directories = get_subfolders_recursively(DOCUMENTATION_ROOT)
 
     for directory in directories:
-        dir_ancestors = create_ancestor_page(get_title(get_ancestor_doc_file(directory)), directory, doc_ancestors)
+        dir_landing_page_file = get_landing_page_doc_file(directory)
+        dir_landing_as_ancestor = create_dir_landing_page_recursively(dir_landing_page_file, directory)
 
         for file in os.scandir(directory):
-            if file.path.endswith('.md') and not (file.path.endswith(DOCUMENTATION_TEMPLATE) or file.path.endswith(get_ancestor_doc_file(directory))):
+            if file.path.endswith('.md') and not (file.path.endswith(DOCUMENTATION_TEMPLATE) or file.path.endswith(dir_landing_page_file)):
                 LOGGER.info('Markdown file:\t%s', file.name)
                 title = get_title(file.path)
 
@@ -764,9 +788,9 @@ def main():
                     log_html(html)
                 else:
                     if page:
-                        update_page(page.id, title, html, page.version, dir_ancestors, ATTACHMENTS, file.path)
+                        update_page(page.id, title, html, page.version, dir_landing_as_ancestor, ATTACHMENTS, file.path)
                     else:
-                        create_page(title, html, dir_ancestors, file.path)
+                        create_page(title, html, dir_landing_as_ancestor, file.path)
                 continue
     if SIMULATE:
         LOGGER.info("Simulate mode completed successfully.")
