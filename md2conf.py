@@ -297,22 +297,8 @@ def get_page(title):
     session.auth = (USERNAME, API_KEY)
 
     response = session.get(url)
-
-    # Check for errors
-    try:
-        response.raise_for_status()
-    except requests.RequestException as err:
-        LOGGER.error('err.response: %s', err)
-        if response.status_code == 404:
-            LOGGER.error('Error: Page not found. Check the following are correct:')
-            LOGGER.error('\tSpace Key : %s', SPACE_KEY)
-            LOGGER.error('\tOrganisation Name: %s', ORGNAME)
-        else:
-            LOGGER.error('Error: %d - %s', response.status_code, response.content)
-        sys.exit(1)
-
+    check_for_errors(response)
     data = response.json()
-
     LOGGER.debug("data: %s", str(data))
 
     if len(data[u'results']) >= 1:
@@ -325,6 +311,64 @@ def get_page(title):
         return page
 
     return False
+
+
+def get_child_pages_recursively(page_id):
+    """
+     Retrieve details of the child pages by page id
+
+    :param page_id: page id
+    :return: title of child pages
+    """
+    LOGGER.info('\tRetrieving information of original child pages: %s', page_id)
+    pages = get_child_pages(page_id)
+
+    for page in pages:
+        page_id = page.page_id
+        child_pages = get_child_pages(page_id)
+        if child_pages:
+            pages.extend(child_pages)
+
+    titles = []
+    for page in pages:
+        titles.append(page.title)
+
+    return titles
+
+
+def get_child_pages(page_id):
+    url = '%s/rest/api/content/search?cql=parent=%s' % (CONFLUENCE_API_URL, urllib.parse.quote_plus(page_id))
+
+    session = requests.Session()
+    session.auth = (USERNAME, API_KEY)
+
+    response = session.get(url)
+    check_for_errors(response)
+
+    data = response.json()
+    LOGGER.debug("data: %s", str(data))
+
+    pages = []
+    for result in data[u'results']:
+        child_page = collections.namedtuple('ChildPage', ['page_id', 'title'])
+        page = child_page(result[u'id'], result[u'title'])
+        pages.append(page)
+
+    return pages
+
+
+def check_for_errors(response):
+    try:
+        response.raise_for_status()
+    except requests.RequestException as err:
+        LOGGER.error('err.response: %s', err)
+        if response.status_code == 404:
+            LOGGER.error('Error: Page not found. Check the following are correct:')
+            LOGGER.error('\tSpace Key : %s', SPACE_KEY)
+            LOGGER.error('\tOrganisation Name: %s', ORGNAME)
+        else:
+            LOGGER.error('Error: %d - %s', response.status_code, response.content)
+        sys.exit(1)
 
 
 # Scan for images and upload as attachments if found
@@ -647,7 +691,7 @@ def get_title(filepath):
 
 
 def get_ancestor_doc_file(directory):
-    return directory + directory.split('\\')[-2] + '.md'
+    return DOCUMENTATION_DIRECTORY + directory.split('\\')[-2] + '.md'
 
 
 def create_ancestor_page(page, directory, ancestor):
@@ -672,6 +716,14 @@ def log_html(html):
     log_file.write(html)
 
 
+def get_subfolders_recursively(dirname):
+    subfolders = [f.path for f in os.scandir(dirname) if f.is_dir()]
+    for dirname in list(subfolders):
+        subfolders.extend(get_subfolders_recursively(dirname))
+
+    return subfolders
+
+
 def main():
     """
     Main program
@@ -684,12 +736,14 @@ def main():
 
     LOGGER.info('Space Key:\t%s', SPACE_KEY)
 
-    doc_ancestors = create_ancestor_page(get_title(get_ancestor_doc_file(DOCUMENTATION_DIRECTORY)), DOCUMENTATION_DIRECTORY, [])
+    doc_file = get_ancestor_doc_file(DOCUMENTATION_DIRECTORY)
+    original_child_pages = get_child_pages_recursively(get_page(get_title(doc_file)).id)
+    LOGGER.info(original_child_pages)
 
-    directories = []
-    for name in os.listdir(DOCUMENTATION_DIRECTORY):
-        if os.path.isdir(DOCUMENTATION_DIRECTORY + name):
-            directories.append(name)
+    doc_ancestors = create_ancestor_page(get_title(doc_file), DOCUMENTATION_DIRECTORY, [])
+
+    directories = get_subfolders_recursively(DOCUMENTATION_DIRECTORY)
+    LOGGER.info(directories)
 
     for directory in directories:
         dir_ancestors = create_ancestor_page(get_title(get_ancestor_doc_file(directory)), directory, doc_ancestors)
