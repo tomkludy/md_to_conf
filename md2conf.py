@@ -376,7 +376,7 @@ def add_images(page_id, html, filepath):
     """
     source_folder = os.path.dirname(os.path.abspath(filepath))
 
-    for tag in re.findall('<img(.*?)\/>', html):
+    for tag in re.findall('<img(.*?)/>', html):
         rel_path = re.search('src="(.*?)"', tag).group(1)
         alt_text = re.search('alt="(.*?)"', tag).group(1)
         abs_path = os.path.join(source_folder, rel_path)
@@ -448,16 +448,16 @@ def create_page(title, body, ancestors, filepath):
     session.auth = (USERNAME, API_KEY)
     session.headers.update({'Content-Type': 'application/json'})
 
-    new_page = {'type': 'page', \
-                'title': title, \
-                'space': {'key': SPACE_KEY}, \
-                'body': { \
-                    'storage': { \
-                        'value': body, \
-                        'representation': 'storage' \
-                        } \
-                    }, \
-                'ancestors': ancestors \
+    new_page = {'type': 'page',
+                'title': title,
+                'space': {'key': SPACE_KEY},
+                'body': {
+                    'storage': {
+                        'value': body,
+                        'representation': 'storage'
+                    }
+                },
+                'ancestors': ancestors
                 }
 
     LOGGER.debug("data: %s", json.dumps(new_page))
@@ -540,23 +540,23 @@ def update_page(page_id, title, body, version, ancestors, attachments, filepath)
     session.auth = (USERNAME, API_KEY)
     session.headers.update({'Content-Type': 'application/json'})
 
-    page_json = { \
-        "id": page_id, \
-        "type": "page", \
-        "title": title, \
-        "space": {"key": SPACE_KEY}, \
-        "body": { \
-            "storage": { \
-                "value": body, \
-                "representation": "storage" \
-                } \
-            }, \
-        "version": { \
-            "number": version + 1, \
-            "minorEdit": True \
-            }, \
-        'ancestors': ancestors \
-        }
+    page_json = {
+        "id": page_id,
+        "type": "page",
+        "title": title,
+        "space": {"key": SPACE_KEY},
+        "body": {
+            "storage": {
+                "value": body,
+                "representation": "storage"
+            }
+        },
+        "version": {
+            "number": version + 1,
+            "minorEdit": True
+        },
+        'ancestors': ancestors
+    }
 
     response = session.put(url, data=json.dumps(page_json))
     response.raise_for_status()
@@ -663,7 +663,9 @@ def get_html(filepath):
     html = convert_code_block(html)
     if CONTENTS:
         html = add_contents(html)
+
     html = process_refs(html)
+    html = resolve_refs(html)
     LOGGER.debug('html: %s', html)
 
     return html
@@ -737,6 +739,19 @@ def create_dir_landing_page_recursively(dir_landing_page_file, directory):
     return page_as_ancestor
 
 
+def resolve_refs(html):
+    refs = re.findall('(href="([^"]+)")', html)
+    if refs:
+        for ref in refs:
+            if not ref[1].startswith(('http', '/')) and ref[1].endswith('.md'):
+                with open(os.path.dirname(MARKDOWN_FILE) + "/" + ref[1], 'r') as mdfile:
+                    title = mdfile.readline().lstrip('#').strip()
+                page = get_page(title)
+                if page:
+                    html = html.replace(ref[0], "href=\"" + page.link + "\"")
+    return html
+
+
 def main():
     """
     Main program
@@ -766,7 +781,6 @@ def main():
     create_dir_landing_page(doc_file, DOCUMENTATION_ROOT, [])
 
     directories = get_subfolders_recursively(DOCUMENTATION_ROOT)
-
     for directory in directories:
         dir_landing_page_file = get_landing_page_doc_file(directory)
         dir_landing_as_ancestor = create_dir_landing_page_recursively(dir_landing_page_file, directory)
