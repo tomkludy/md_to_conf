@@ -702,8 +702,8 @@ def create_dir_landing_page(dir_landing_page_file, directory, ancestors):
         log_html(html)
         return []
     elif parent_page:
-        update_page(parent_page.id, landing_page_title, html, parent_page.version, ancestors, [], landing_page_doc_file)
-        page_as_ancestor = get_page_as_ancestor(parent_page.id)
+        LOGGER.error('Page not cleared before recreating pages: %s', landing_page_title)
+        sys.exit(1)
     else:
         page_id = create_page(landing_page_title, html, ancestors, landing_page_doc_file)
         page_as_ancestor = get_page_as_ancestor(page_id)
@@ -759,6 +759,7 @@ def main():
     LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
 
     [delete_page(page_id) for page_id in original_child_pages]
+    delete_page(doc_landing_page.id)
     if DELETE:
         sys.exit(1)
 
@@ -783,7 +784,8 @@ def main():
                     log_html(html)
                 else:
                     if page:
-                        update_page(page.id, title, html, page.version, dir_landing_as_ancestor, ATTACHMENTS, file.path)
+                        LOGGER.error('Page not cleared before recreating pages: %s', title)
+                        sys.exit(1)
                     else:
                         create_page(title, html, dir_landing_as_ancestor, file.path)
                 continue
