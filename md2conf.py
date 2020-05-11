@@ -40,8 +40,6 @@ PARSER.add_argument('-o', '--orgname',
                          'e.g. https://XXX.atlassian.net/wiki'
                          'If orgname contains a dot, considered as the fully qualified domain name.'
                          'e.g. https://XXX')
-PARSER.add_argument('-t', '--attachment', nargs='+',
-                    help='Attachment(s) to upload to page. Paths relative to the markdown file.')
 PARSER.add_argument('-c', '--contents', action='store_true', default=False,
                     help='Use this option to generate a contents page.')
 PARSER.add_argument('-g', '--nogo', action='store_true', default=False,
@@ -73,7 +71,6 @@ try:
     NOSSL = ARGS.nossl
     DELETE = ARGS.delete
     SIMULATE = ARGS.simulate
-    ATTACHMENTS = ARGS.attachment
     GO_TO_PAGE = not ARGS.nogo
     CONTENTS = ARGS.contents
 
@@ -108,7 +105,7 @@ except Exception as err:
 
 def convert_comment_block(html):
     """
-    Convert markdown code bloc to Confluence hidden comment
+    Convert markdown code block to Confluence hidden comment
 
     :param html: string
     :return: modified html string
@@ -318,7 +315,7 @@ def get_child_page_ids(page_id):
      Retrieve details of the child pages by page id
 
     :param page_id: page id
-    :return: ids of child pages
+    :return: the id of every child pages
     """
     LOGGER.info('\tRetrieving information of original child pages: %s', page_id)
     page_ids = get_child_pages_recursively(page_id)
@@ -332,6 +329,12 @@ def get_child_page_ids(page_id):
 
 
 def get_child_pages_recursively(page_id):
+    """
+     Retrieve immediate child page ids
+
+    :param page_id: page id
+    :return: ids of immediate child pages
+    """
     url = '%s/rest/api/content/search?cql=parent=%s' % (CONFLUENCE_API_URL, urllib.parse.quote_plus(page_id))
 
     session = requests.Session()
@@ -351,6 +354,12 @@ def get_child_pages_recursively(page_id):
 
 
 def check_for_errors(response):
+    """
+   Check response for errors and log help if necessary
+
+   :param response: the received response
+   :return
+   """
     try:
         response.raise_for_status()
     except requests.RequestException as err:
@@ -364,7 +373,6 @@ def check_for_errors(response):
         sys.exit(1)
 
 
-# Scan for images and upload as attachments if found
 def add_images(page_id, html, filepath):
     """
     Scan for images and upload as attachments if found
@@ -412,22 +420,6 @@ def add_contents(html):
 
     html = contents_markup + '\n' + html
     return html
-
-
-def add_attachments(page_id, files, filepath):
-    """
-    Add attachments for an array of files
-
-    :param page_id: Confluence page id
-    :param files: list of files to attach to the given Confluence page
-    :param filepath: markdown file full path
-    :return: None
-    """
-    source_folder = os.path.dirname(os.path.abspath(filepath))
-
-    if files:
-        for file in files:
-            upload_attachment(page_id, os.path.join(source_folder, file), '')
 
 
 def create_page(title, body, ancestors, filepath):
@@ -480,9 +472,9 @@ def create_page(title, body, ancestors, filepath):
         LOGGER.info('URL: %s', link)
 
         img_check = re.search('<img(.*?)\/>', body)
-        if img_check or ATTACHMENTS:
+        if img_check:
             LOGGER.info('\tAttachments found, update procedure called.')
-            update_page(page_id, title, body, version, ancestors, ATTACHMENTS, filepath)
+            update_page(page_id, title, body, version, ancestors, filepath)
         else:
             if GO_TO_PAGE:
                 webbrowser.open(link)
@@ -515,7 +507,7 @@ def delete_page(page_id):
         LOGGER.error('Page %s could not be deleted.', page_id)
 
 
-def update_page(page_id, title, body, version, ancestors, attachments, filepath):
+def update_page(page_id, title, body, version, ancestors, filepath):
     """
     Update a page
 
@@ -524,7 +516,6 @@ def update_page(page_id, title, body, version, ancestors, attachments, filepath)
     :param body: confluence page content
     :param version: confluence page version
     :param ancestors: confluence page ancestor
-    :param attachments: confluence page attachments
     :param filepath: markdown file full path
     :return: None
     """
@@ -532,7 +523,6 @@ def update_page(page_id, title, body, version, ancestors, attachments, filepath)
 
     # Add images and attachments
     body = add_images(page_id, body, filepath)
-    add_attachments(page_id, attachments, filepath)
 
     url = '%s/rest/api/content/%s' % (CONFLUENCE_API_URL, page_id)
 
@@ -601,7 +591,7 @@ def get_attachment(page_id, filename):
 
 def upload_attachment(page_id, file, comment):
     """
-    Upload an attachement
+    Upload an attachment
 
     :param page_id: confluence page id
     :param file: attachment file
@@ -641,15 +631,13 @@ def upload_attachment(page_id, file, comment):
     return True
 
 
-def remove_collapsible_headings(read):
-    read = read.replace('<details>', '')
-    read = read.replace('</details>', '')
-    read = read.replace('<summary>', '')
-    read = read.replace('</summary>', '')
-    return read
-
-
 def get_html(filepath):
+    """
+    Generate html from md file
+
+    :param filepath: the file to translate to html
+    :return: html translation
+    """
     with codecs.open(filepath, 'r', 'utf-8') as mdfile:
         read = mdfile.read()
         read = remove_collapsible_headings(read)
@@ -671,13 +659,70 @@ def get_html(filepath):
     return html
 
 
+def remove_collapsible_headings(read):
+    """
+    Removes collapsible headings from markdown read from file
+
+    :param read: raw markdown read from file
+    :return: markdown without tags for collapsible headings
+    """
+    read = read.replace('<details>', '')
+    read = read.replace('</details>', '')
+    read = read.replace('<summary>', '')
+    read = read.replace('</summary>', '')
+    return read
+
+
+def resolve_refs(html, filepath):
+    """
+    Translates relative links in html, but keeps absolute links
+
+    :param html: html
+    :param filepath: path to markdown file
+    :return: html file with relative links
+    """
+    refs = re.findall('(href="([^"]+)")', html)
+    if refs:
+        for ref in refs:
+            if not ref[1].startswith(('http', '/')) and ref[1].endswith('.md'):
+                with open(os.path.dirname(filepath) + "/" + ref[1], 'r') as mdfile:
+                    title = mdfile.readline().lstrip('#').strip()
+                page = get_page(title)
+                if page:
+                    html = html.replace(ref[0], "href=\"" + page.link + "\"")
+    return html
+
+
 def add_note(html):
+    """
+    Adds a warning to the top of the html page
+
+    :param html: the raw html
+    :return: html with warning
+    """
     warning = '<p>~!This is a generated file. Any modifications to it will be lost upon next update. Please use the documentation files in the project repository. !~</p>'
     html = warning + html
     return html
 
 
+def log_html(html):
+    """
+    Logs generated html to file
+
+    :param html: html to log
+    :return:
+    """
+    log_file = open(LOG_FILE, 'a')
+    log_file.write(html)
+
+
 def get_title(filepath):
+    """
+    Returns confluence page title extracted from the markdown file
+
+    :param filepath: full path to  markdown file
+    :return: confluence page title
+    """
     with open(filepath, 'r') as mdfile:
         title = mdfile.readline().lstrip('#').strip()
         mdfile.seek(0)
@@ -686,24 +731,44 @@ def get_title(filepath):
 
 
 def get_landing_page_doc_file(directory):
+    """
+    Get full file path to the markdown file corresponding to the directory
+
+    :param directory: the directory
+    :return: full path to corresponding landing page markdown file
+    """
     root = os.path.abspath(DOCUMENTATION_ROOT)
     md_file = directory.split('\\')[-1] + '.md'
     return root + '\\' + md_file
 
 
 def get_page_as_ancestor(page_id):
+    """
+    Get ancestors object accepted by the API from a page id
+
+    :param page_id: the ancestor page id
+    :return: API-compatible ancestor
+    """
     return [{'type': 'page', 'id': page_id}]
 
 
 def create_dir_landing_page(dir_landing_page_file, directory, ancestors):
+    """
+    Create landing page for a directory
+
+    :param dir_landing_page_file: the raw markdown file to use for landing page html generation
+    :param directory: the directory
+    :param ancestors: the ancestor pages of the new landing page
+    :return: the created landing page as a API-compatible ancestors object
+    """
     landing_page_title = get_title(dir_landing_page_file)
-    parent_page = get_page(landing_page_title)
+    ancestor_page = get_page(landing_page_title)
     landing_page_doc_file = get_landing_page_doc_file(directory)
     html = get_html(landing_page_doc_file)
     if SIMULATE:
         log_html(html)
         return []
-    elif parent_page:
+    elif ancestor_page:
         LOGGER.error('Page not cleared before recreating pages: %s', landing_page_title)
         sys.exit(1)
     else:
@@ -712,20 +777,14 @@ def create_dir_landing_page(dir_landing_page_file, directory, ancestors):
     return page_as_ancestor
 
 
-def log_html(html):
-    log_file = open(LOG_FILE, 'a')
-    log_file.write(html)
-
-
-def get_subfolders_recursively(dirname):
-    subfolders = [f.path for f in os.scandir(dirname) if f.is_dir()]
-    for dirname in list(subfolders):
-        subfolders.extend(get_subfolders_recursively(dirname))
-
-    return subfolders
-
-
 def create_dir_landing_page_recursively(dir_landing_page_file, directory):
+    """
+    Create ancestor landing page for directory
+
+    :param dir_landing_page_file: the raw markdown file to use for landing page html generation
+    :param directory: the directory
+    :return: the created landing page as a API-compatible ancestors object
+    """
     ancestor_landing_page_dir = os.path.abspath(os.path.join(directory, os.pardir))
     ancestor_landing_page_file = get_landing_page_doc_file(ancestor_landing_page_dir)
     ancestor_landing_page_title = get_title(ancestor_landing_page_file)
@@ -739,17 +798,18 @@ def create_dir_landing_page_recursively(dir_landing_page_file, directory):
     return page_as_ancestor
 
 
-def resolve_refs(html, filepath):
-    refs = re.findall('(href="([^"]+)")', html)
-    if refs:
-        for ref in refs:
-            if not ref[1].startswith(('http', '/')) and ref[1].endswith('.md'):
-                with open(os.path.dirname(filepath) + "/" + ref[1], 'r') as mdfile:
-                    title = mdfile.readline().lstrip('#').strip()
-                page = get_page(title)
-                if page:
-                    html = html.replace(ref[0], "href=\"" + page.link + "\"")
-    return html
+def get_subdirectories_recursively(directory):
+    """
+    Get subdirectories under the directory
+
+    :param directory: the directory
+    :return: list of subdirectories
+    """
+    subdirectories = [f.path for f in os.scandir(directory) if f.is_dir()]
+    for directory in list(subdirectories):
+        subdirectories.extend(get_subdirectories_recursively(directory))
+
+    return subdirectories
 
 
 def main():
@@ -772,10 +832,10 @@ def main():
         if doc_landing_page:
             original_child_pages.append(doc_landing_page_title)
             original_child_pages = get_child_page_ids(doc_landing_page.id)
+            delete_page(doc_landing_page.id)
         LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
 
         [delete_page(page_id) for page_id in original_child_pages]
-        delete_page(doc_landing_page.id)
         if DELETE:
             sys.exit(1)
 
@@ -784,17 +844,17 @@ def main():
         html = get_html(doc_file)
         log_html(html)
 
-    directories = get_subfolders_recursively(DOCUMENTATION_ROOT)
+    directories = get_subdirectories_recursively(DOCUMENTATION_ROOT)
     for directory in directories:
         dir_landing_page_file = get_landing_page_doc_file(directory)
-        if not SIMULATE:
-            dir_landing_as_ancestor = create_dir_landing_page_recursively(dir_landing_page_file, directory)
-        else:
+        if SIMULATE:
             html = get_html(dir_landing_page_file)
             log_html(html)
+        else:
+            dir_landing_as_ancestor = create_dir_landing_page_recursively(dir_landing_page_file, directory)
 
         for file in os.scandir(directory):
-            if file.path.endswith('.md') and not (file.path.endswith(DOCUMENTATION_TEMPLATE) or file.path.endswith(dir_landing_page_file)):
+            if file.path.endswith('.md') and not file.path.endswith(DOCUMENTATION_TEMPLATE):
                 LOGGER.info('Markdown file:\t%s', file.name)
                 title = get_title(file.path)
 
