@@ -665,7 +665,7 @@ def get_html(filepath):
         html = add_contents(html)
 
     html = process_refs(html)
-    html = resolve_refs(html)
+    html = resolve_refs(html, filepath)
     LOGGER.debug('html: %s', html)
 
     return html
@@ -739,12 +739,12 @@ def create_dir_landing_page_recursively(dir_landing_page_file, directory):
     return page_as_ancestor
 
 
-def resolve_refs(html):
+def resolve_refs(html, filepath):
     refs = re.findall('(href="([^"]+)")', html)
     if refs:
         for ref in refs:
             if not ref[1].startswith(('http', '/')) and ref[1].endswith('.md'):
-                with open(os.path.dirname(MARKDOWN_FILE) + "/" + ref[1], 'r') as mdfile:
+                with open(os.path.dirname(filepath) + "/" + ref[1], 'r') as mdfile:
                     title = mdfile.readline().lstrip('#').strip()
                 page = get_page(title)
                 if page:
@@ -765,25 +765,33 @@ def main():
     LOGGER.info('Space Key:\t%s', SPACE_KEY)
 
     doc_file = get_landing_page_doc_file(DOCUMENTATION_ROOT)
-    doc_landing_page_title = get_title(doc_file)
-    doc_landing_page = get_page(doc_landing_page_title)
-    original_child_pages = []
-    if doc_landing_page:
-        original_child_pages.append(doc_landing_page_title)
-        original_child_pages = get_child_page_ids(doc_landing_page.id)
-    LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
+    if not SIMULATE:
+        doc_landing_page_title = get_title(doc_file)
+        doc_landing_page = get_page(doc_landing_page_title)
+        original_child_pages = []
+        if doc_landing_page:
+            original_child_pages.append(doc_landing_page_title)
+            original_child_pages = get_child_page_ids(doc_landing_page.id)
+        LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
 
-    [delete_page(page_id) for page_id in original_child_pages]
-    delete_page(doc_landing_page.id)
-    if DELETE:
-        sys.exit(1)
+        [delete_page(page_id) for page_id in original_child_pages]
+        delete_page(doc_landing_page.id)
+        if DELETE:
+            sys.exit(1)
 
-    create_dir_landing_page(doc_file, DOCUMENTATION_ROOT, [])
+        create_dir_landing_page(doc_file, DOCUMENTATION_ROOT, [])
+    else:
+        html = get_html(doc_file)
+        log_html(html)
 
     directories = get_subfolders_recursively(DOCUMENTATION_ROOT)
     for directory in directories:
         dir_landing_page_file = get_landing_page_doc_file(directory)
-        dir_landing_as_ancestor = create_dir_landing_page_recursively(dir_landing_page_file, directory)
+        if not SIMULATE:
+            dir_landing_as_ancestor = create_dir_landing_page_recursively(dir_landing_page_file, directory)
+        else:
+            html = get_html(dir_landing_page_file)
+            log_html(html)
 
         for file in os.scandir(directory):
             if file.path.endswith('.md') and not (file.path.endswith(DOCUMENTATION_TEMPLATE) or file.path.endswith(dir_landing_page_file)):
