@@ -34,7 +34,6 @@ PARSER = argparse.ArgumentParser()
 PARSER.add_argument('spacekey',
                     help="Confluence Space key for the page. ")
 PARSER.add_argument('-u', '--username', help='Confluence username if $CONFLUENCE_USERNAME not set.')
-PARSER.add_argument('-p', '--apikey', help='Confluence API key if $CONFLUENCE_API_KEY not set.')
 PARSER.add_argument('-o', '--orgname',
                     help='Confluence organisation if $CONFLUENCE_ORGNAME not set. '
                          'e.g. https://XXX.atlassian.net/wiki'
@@ -66,7 +65,6 @@ try:
 
     SPACE_KEY = ARGS.spacekey
     USERNAME = os.getenv('CONFLUENCE_USERNAME', ARGS.username)
-    API_KEY = os.getenv('CONFLUENCE_API_KEY', ARGS.apikey)
     ORGNAME = os.getenv('CONFLUENCE_ORGNAME', ARGS.orgname)
     NOSSL = ARGS.nossl
     DELETE = ARGS.delete
@@ -78,8 +76,9 @@ try:
         LOGGER.error('Error: Username not specified by environment variable or option.')
         sys.exit(1)
 
+    API_KEY = open('api_key.txt', 'r').read().strip()
     if API_KEY is None:
-        LOGGER.error('Error: API key not specified by environment variable or option.')
+        LOGGER.error('Error: API key not specified.')
         sys.exit(1)
 
     if SPACE_KEY is None:

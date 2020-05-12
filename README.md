@@ -59,7 +59,6 @@ These can be specified at runtime or set as Confluence environment variables
 
 ``` bash
 export CONFLUENCE_USERNAME='basil'
-export CONFLUENCE_API_KEY='abc123'
 export CONFLUENCE_ORGNAME='fawltytowers'
 ```
 
@@ -73,11 +72,12 @@ The minimum accepted parameters are the username, the API key, the organisation 
 Mandatory Confluence parameters can also be set here if not already set as environment variables:
 
 * **-u** **--username**: Confluence User
-* **-p** **--apikey**: Confluence API Key
 * **-o** **--orgname**: Confluence Organisation
 
+Meanwhile the API key is read from a local file, api_key.txt.
+
 ```less
-python3 md2conf.py Test-Space --username your.username@aliz.ai --apikey TST --orgname sgjira
+python3 md2conf.py Test-Space --username your.username@aliz.ai --orgname sgjira
 ```
 
 Use **-h** to view a list of all available options.
