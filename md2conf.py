@@ -768,12 +768,22 @@ def create_dir_landing_page(dir_landing_page_file, directory, ancestors):
         log_html(html)
         return []
     elif ancestor_page:
-        LOGGER.error('Page not cleared before recreating pages: %s', landing_page_title)
-        sys.exit(1)
-    else:
-        page_id = create_page(landing_page_title, html, ancestors, landing_page_doc_file)
-        page_as_ancestor = get_page_as_ancestor(page_id)
+        handle_not_cleared_page(ancestor_page, landing_page_title)
+
+    page_id = create_page(landing_page_title, html, ancestors, landing_page_doc_file)
+    page_as_ancestor = get_page_as_ancestor(page_id)
+
     return page_as_ancestor
+
+
+def handle_not_cleared_page(page, title):
+    LOGGER.warning('Page not cleared before recreating pages, because it is not a child page of Documentation: %s', title)
+    input_value = input('Type \'yes\' if you wish to delete the page.')
+    if input_value == 'yes':
+        delete_page(page.id)
+    else:
+        LOGGER.error('Can not create page with title %s, because a page with the same title already exists in this space', title)
+        sys.exit(1)
 
 
 def create_dir_landing_page_recursively(dir_landing_page_file, directory):
@@ -865,10 +875,9 @@ def main():
                     log_html(html)
                 else:
                     if page:
-                        LOGGER.error('Page not cleared before recreating pages: %s', title)
-                        sys.exit(1)
-                    else:
-                        create_page(title, html, dir_landing_as_ancestor, file.path)
+                        handle_not_cleared_page(page, title)
+
+                    create_page(title, html, dir_landing_as_ancestor, file.path)
                 continue
 
     if SIMULATE:
