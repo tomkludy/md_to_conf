@@ -1,13 +1,12 @@
 # Documentation
 ## Markdown to Confluence Converter
 
-A script to import every markdown document under the docs folder into Confluence.
+A script to import every markdown document under the dagrofa-merkur/docs folder into Confluence.
 It handles inline images as well as code blocks.
 Also there is support for some custom markdown tags for use with commonly used Confluence macros.
 
-As a first step the tool deletes every page under Documentation in Confluence.
 Each file will be converted into HTML or Confluence storage markup when required.
-Then a page will be created in the space.
+Then a page will be created or updated in the space.
 The hierarchy of the Confluence pages will mirror the folder structure under docs.
 Every folder has to have a markdown file under docs with the same name as the folder, to allow generating a corresponding page in the hierarchy. 
 
@@ -59,6 +58,7 @@ These can be specified at runtime or set as Confluence environment variables
 
 ``` bash
 export CONFLUENCE_USERNAME='basil'
+export CONFLUENCE_API_KEY='abc123'
 export CONFLUENCE_ORGNAME='fawltytowers'
 ```
 
@@ -72,9 +72,8 @@ The minimum accepted parameters are the username, the API key, the organisation 
 Mandatory Confluence parameters can also be set here if not already set as environment variables:
 
 * **-u** **--username**: Confluence User
+* **-p** **--apikey**: Confluence API Key
 * **-o** **--orgname**: Confluence Organisation
-
-Meanwhile the API key is read from a local file, api_key.txt.
 
 ```less
 python3 md2conf.py Test-Space --username your.username@aliz.ai --orgname sgjira

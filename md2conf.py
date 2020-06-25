@@ -21,8 +21,11 @@ import codecs
 import argparse
 import urllib
 import webbrowser
+from pathlib import Path
+
 import requests
 import markdown
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - \
 %(levelname)s - %(funcName)s [%(lineno)d] - \
@@ -31,14 +34,18 @@ LOGGER = logging.getLogger(__name__)
 
 # ArgumentParser to parse arguments and options
 PARSER = argparse.ArgumentParser()
+PARSER.add_argument("folder", help="Full path of the documentation folder to convert and upload.")
 PARSER.add_argument('spacekey',
                     help="Confluence Space key for the page. ")
 PARSER.add_argument('-u', '--username', help='Confluence username if $CONFLUENCE_USERNAME not set.')
+PARSER.add_argument('-p', '--apikey', help='Confluence API key if $CONFLUENCE_API_KEY not set.')
 PARSER.add_argument('-o', '--orgname',
                     help='Confluence organisation if $CONFLUENCE_ORGNAME not set. '
                          'e.g. https://XXX.atlassian.net/wiki'
                          'If orgname contains a dot, considered as the fully qualified domain name.'
                          'e.g. https://XXX')
+PARSER.add_argument('-a', '--ancestor',
+                    help='The id of the parent page under which every other page will be created or updated. You can find the id in the URL.')
 PARSER.add_argument('-c', '--contents', action='store_true', default=False,
                     help='Use this option to generate a contents page.')
 PARSER.add_argument('-g', '--nogo', action='store_true', default=False,
@@ -51,6 +58,8 @@ PARSER.add_argument('-l', '--loglevel', default='INFO',
                     help='Use this option to set the log verbosity.')
 PARSER.add_argument('-s', '--simulate', action='store_true', default=False,
                     help='Use this option to only show conversion result.')
+PARSER.add_argument('-ht', '--loghtml', action='store_true', default=False,
+                    help='Use this option to log generated html pages in separate files.')
 
 ARGS = PARSER.parse_args()
 
@@ -59,16 +68,21 @@ try:
     # Set log level
     LOGGER.setLevel(getattr(logging, ARGS.loglevel.upper(), None))
 
-    DOCUMENTATION_ROOT = '..\\dagrofa-merkur\\docs'
+    DOCUMENTATION_ROOT = ARGS.folder
     DOCUMENTATION_TEMPLATE = 'template.md'
-    LOG_FILE = 'logs\\logs.txt'
+    LOG_FILE_NAME = 'logs_' + datetime.now().strftime("%Y_%m_%d-%H_%M") + '.txt'
+    LOG_FOLDER = 'logs/'
+    LOG_FILE = LOG_FOLDER + LOG_FILE_NAME
 
     SPACE_KEY = ARGS.spacekey
+    API_KEY = os.getenv('CONFLUENCE_API_KEY', ARGS.apikey)
     USERNAME = os.getenv('CONFLUENCE_USERNAME', ARGS.username)
     ORGNAME = os.getenv('CONFLUENCE_ORGNAME', ARGS.orgname)
+    ANCESTOR = ARGS.ancestor
     NOSSL = ARGS.nossl
     DELETE = ARGS.delete
     SIMULATE = ARGS.simulate
+    LOG_HTML = ARGS.loghtml
     GO_TO_PAGE = not ARGS.nogo
     CONTENTS = ARGS.contents
 
@@ -76,13 +90,16 @@ try:
         LOGGER.error('Error: Username not specified by environment variable or option.')
         sys.exit(1)
 
-    API_KEY = open('api_key.txt', 'r').read().strip()
     if API_KEY is None:
-        LOGGER.error('Error: API key not specified.')
+        LOGGER.error('Error: API key not specified by environment variable or option.')
         sys.exit(1)
 
     if SPACE_KEY is None:
         SPACE_KEY = '~%s' % (USERNAME)
+
+    if ANCESTOR is None:
+        LOGGER.error('Error: The ancestor page is not specified under which the documentation should be created.')
+        sys.exit(1)
 
     if ORGNAME is not None:
         if ORGNAME.find('.') != -1:
@@ -317,19 +334,19 @@ def get_child_page_ids(page_id):
     :return: the id of every child pages
     """
     LOGGER.info('\tRetrieving information of original child pages: %s', page_id)
-    page_ids = get_child_pages_recursively(page_id)
+    page_ids = get_all_child_pages(page_id)
 
     for page_id in page_ids:
-        child_pages = get_child_pages_recursively(page_id)
+        child_pages = get_all_child_pages(page_id)
         if child_pages:
             page_ids.extend(child_pages)
 
     return page_ids
 
 
-def get_child_pages_recursively(page_id):
+def get_all_child_pages(page_id):
     """
-     Retrieve immediate child page ids
+     Retrieve every child page id
 
     :param page_id: page id
     :return: ids of immediate child pages
@@ -639,7 +656,6 @@ def get_html(filepath):
     """
     with codecs.open(filepath, 'r', 'utf-8') as mdfile:
         read = mdfile.read()
-        read = remove_collapsible_headings(read)
         html = markdown.markdown(read, extensions=['markdown.extensions.tables',
                                                    'markdown.extensions.fenced_code',
                                                    'markdown.extensions.sane_lists'])
@@ -653,23 +669,15 @@ def get_html(filepath):
 
     html = process_refs(html)
     html = resolve_refs(html, filepath)
-    LOGGER.debug('html: %s', html)
+    if LOG_HTML:
+        title = get_title(filepath)
+        html_log_file = open(LOG_FOLDER + title + '.html', 'w+')
+        html_log_file.write('<h1>' + title + '</h1>')
+        html_log_file.write(html)
+    else:
+        LOGGER.debug('\tfile: %s \n\thtml: %s', filepath, html)
 
     return html
-
-
-def remove_collapsible_headings(read):
-    """
-    Removes collapsible headings from markdown read from file
-
-    :param read: raw markdown read from file
-    :return: markdown without tags for collapsible headings
-    """
-    read = read.replace('<details>', '')
-    read = read.replace('</details>', '')
-    read = read.replace('<summary>', '')
-    read = read.replace('</summary>', '')
-    return read
 
 
 def resolve_refs(html, filepath):
@@ -704,14 +712,18 @@ def add_note(html):
     return html
 
 
-def log_html(html):
+def log_html(html, title):
     """
     Logs generated html to file
 
     :param html: html to log
+    :param title: title of the logged file
     :return:
     """
-    log_file = open(LOG_FILE, 'a')
+    log_file = open(LOG_FILE, 'a+')
+    log_file.write('\n')
+    log_file.write(title)
+    log_file.write('\n')
     log_file.write(html)
 
 
@@ -736,9 +748,9 @@ def get_landing_page_doc_file(directory):
     :param directory: the directory
     :return: full path to corresponding landing page markdown file
     """
-    root = os.path.abspath(DOCUMENTATION_ROOT)
-    md_file = directory.split('\\')[-1] + '.md'
-    return root + '\\' + md_file
+    root = Path(DOCUMENTATION_ROOT)
+    md_file = os.path.basename(directory) + '.md'
+    return root / md_file
 
 
 def get_page_as_ancestor(page_id):
@@ -765,7 +777,7 @@ def create_dir_landing_page(dir_landing_page_file, directory, ancestors):
     landing_page_doc_file = get_landing_page_doc_file(directory)
     html = get_html(landing_page_doc_file)
     if SIMULATE:
-        log_html(html)
+        log_html(html, landing_page_title)
         return []
     elif ancestor_page:
         handle_not_cleared_page(ancestor_page, landing_page_title)
@@ -778,7 +790,7 @@ def create_dir_landing_page(dir_landing_page_file, directory, ancestors):
 
 def handle_not_cleared_page(page, title):
     LOGGER.warning('Page not cleared before recreating pages, because it is not a child page of Documentation: %s', title)
-    input_value = input('Type \'yes\' if you wish to delete the page.')
+    input_value = input('Type \'yes\' if you wish to delete the page. \n')
     if input_value == 'yes':
         delete_page(page.id)
     else:
@@ -786,11 +798,10 @@ def handle_not_cleared_page(page, title):
         sys.exit(1)
 
 
-def create_dir_landing_page_recursively(dir_landing_page_file, directory):
+def create_dir_landing_page_recursively(directory):
     """
     Create ancestor landing page for directory
 
-    :param dir_landing_page_file: the raw markdown file to use for landing page html generation
     :param directory: the directory
     :return: the created landing page as a API-compatible ancestors object
     """
@@ -798,12 +809,24 @@ def create_dir_landing_page_recursively(dir_landing_page_file, directory):
     ancestor_landing_page_file = get_landing_page_doc_file(ancestor_landing_page_dir)
     ancestor_landing_page_title = get_title(ancestor_landing_page_file)
     ancestor_page = get_page(ancestor_landing_page_title)
+    dir_landing_page_file = get_landing_page_doc_file(directory)
 
     if ancestor_page:
-        page_as_ancestor = create_dir_landing_page(dir_landing_page_file, directory, get_page_as_ancestor(ancestor_page.id))
+        page_as_ancestor = get_or_create_page(ancestor_page, dir_landing_page_file, directory)
     else:
-        page_as_ancestor = create_dir_landing_page_recursively(ancestor_landing_page_file, ancestor_landing_page_dir)
+        ancestor_of_page = create_dir_landing_page_recursively(ancestor_landing_page_dir)
+        page_as_ancestor = get_or_create_page(ancestor_of_page, dir_landing_page_file, directory)
 
+    return page_as_ancestor
+
+
+def get_or_create_page(ancestor_page, dir_landing_page_file, directory):
+    title = get_title(dir_landing_page_file)
+    page = get_page(title)
+    if page:
+        page_as_ancestor = get_page_as_ancestor(page.id)
+    else:
+        page_as_ancestor = create_dir_landing_page(dir_landing_page_file, directory, get_page_as_ancestor(ancestor_page.id))
     return page_as_ancestor
 
 
@@ -834,8 +857,8 @@ def main():
     LOGGER.info('Space Key:\t%s', SPACE_KEY)
 
     doc_file = get_landing_page_doc_file(DOCUMENTATION_ROOT)
+    doc_landing_page_title = get_title(doc_file)
     if not SIMULATE:
-        doc_landing_page_title = get_title(doc_file)
         doc_landing_page = get_page(doc_landing_page_title)
         original_child_pages = []
         if doc_landing_page:
@@ -846,21 +869,23 @@ def main():
 
         [delete_page(page_id) for page_id in original_child_pages]
         if DELETE:
+            LOGGER.info('The pages deleted successfully.')
             sys.exit(1)
 
-        create_dir_landing_page(doc_file, DOCUMENTATION_ROOT, [])
+        create_dir_landing_page(doc_file, DOCUMENTATION_ROOT, get_page_as_ancestor(ANCESTOR))
     else:
         html = get_html(doc_file)
-        log_html(html)
+        log_html(html, doc_landing_page_title)
 
     directories = get_subdirectories_recursively(DOCUMENTATION_ROOT)
     for directory in directories:
         dir_landing_page_file = get_landing_page_doc_file(directory)
         if SIMULATE:
+            dir_landing_page_title = get_title(dir_landing_page_file)
             html = get_html(dir_landing_page_file)
-            log_html(html)
+            log_html(html, dir_landing_page_title)
         else:
-            dir_landing_as_ancestor = create_dir_landing_page_recursively(dir_landing_page_file, directory)
+            dir_landing_as_ancestor = create_dir_landing_page_recursively(directory)
 
         for file in os.scandir(directory):
             if file.path.endswith('.md') and not file.path.endswith(DOCUMENTATION_TEMPLATE):
@@ -872,7 +897,7 @@ def main():
 
                 html = get_html(file.path)
                 if SIMULATE:
-                    log_html(html)
+                    log_html(html, title)
                 else:
                     if page:
                         handle_not_cleared_page(page, title)
