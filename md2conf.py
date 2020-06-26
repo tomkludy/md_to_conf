@@ -438,7 +438,7 @@ def add_contents(html):
     return html
 
 
-def create_page(title, body, ancestors, filepath):
+def create_or_update_page(title, body, ancestors, filepath):
     """
     Create a new page
 
@@ -446,58 +446,62 @@ def create_page(title, body, ancestors, filepath):
     :param body: confluence page content
     :param ancestors: confluence page ancestor
     :param filepath: markdown file full path
-    :return: created page id
+    :return: created or updated page id
     """
-    LOGGER.info('Creating page...')
-
-    url = '%s/rest/api/content/' % CONFLUENCE_API_URL
-
-    session = requests.Session()
-    session.auth = (USERNAME, API_KEY)
-    session.headers.update({'Content-Type': 'application/json'})
-
-    new_page = {'type': 'page',
-                'title': title,
-                'space': {'key': SPACE_KEY},
-                'body': {
-                    'storage': {
-                        'value': body,
-                        'representation': 'storage'
-                    }
-                },
-                'ancestors': ancestors
-                }
-
-    LOGGER.debug("data: %s", json.dumps(new_page))
-
-    response = session.post(url, data=json.dumps(new_page))
-    try:
-        response.raise_for_status()
-    except requests.exceptions.HTTPError as excpt:
-        LOGGER.error("error: %s - %s", excpt, response.content)
-        exit(1)
-
-    if response.status_code == 200:
-        data = response.json()
-        space_name = data[u'space'][u'name']
-        page_id = data[u'id']
-        version = data[u'version'][u'number']
-        link = '%s%s' % (CONFLUENCE_API_URL, data[u'_links'][u'webui'])
-
-        LOGGER.info('Page created in %s with ID: %s.', space_name, page_id)
-        LOGGER.info('URL: %s', link)
-
-        img_check = re.search('<img(.*?)\/>', body)
-        if img_check:
-            LOGGER.info('\tAttachments found, update procedure called.')
-            update_page(page_id, title, body, version, ancestors, filepath)
-        else:
-            if GO_TO_PAGE:
-                webbrowser.open(link)
-        return page_id
+    page = get_page(title)
+    if page:
+        return update_page(page.id, title, body, page.version, ancestors, filepath)
     else:
-        LOGGER.error('Could not create page.')
-        sys.exit(1)
+        LOGGER.info('Creating page...')
+
+        url = '%s/rest/api/content/' % CONFLUENCE_API_URL
+
+        session = requests.Session()
+        session.auth = (USERNAME, API_KEY)
+        session.headers.update({'Content-Type': 'application/json'})
+
+        new_page = {'type': 'page',
+                    'title': title,
+                    'space': {'key': SPACE_KEY},
+                    'body': {
+                        'storage': {
+                            'value': body,
+                            'representation': 'storage'
+                        }
+                    },
+                    'ancestors': ancestors
+                    }
+
+        LOGGER.debug("data: %s", json.dumps(new_page))
+
+        response = session.post(url, data=json.dumps(new_page))
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as excpt:
+            LOGGER.error("error: %s - %s", excpt, response.content)
+            exit(1)
+
+        if response.status_code == 200:
+            data = response.json()
+            space_name = data[u'space'][u'name']
+            page_id = data[u'id']
+            version = data[u'version'][u'number']
+            link = '%s%s' % (CONFLUENCE_API_URL, data[u'_links'][u'webui'])
+
+            LOGGER.info('Page created in %s with ID: %s.', space_name, page_id)
+            LOGGER.info('URL: %s', link)
+
+            img_check = re.search('<img(.*?)\/>', body)
+            if img_check:
+                LOGGER.info('\tAttachments found, update procedure called.')
+                update_page(page_id, title, body, version, ancestors, filepath)
+            else:
+                if GO_TO_PAGE:
+                    webbrowser.open(link)
+            return page_id
+        else:
+            LOGGER.error('Could not create page.')
+            sys.exit(1)
 
 
 def delete_page(page_id):
@@ -533,7 +537,7 @@ def update_page(page_id, title, body, version, ancestors, filepath):
     :param version: confluence page version
     :param ancestors: confluence page ancestor
     :param filepath: markdown file full path
-    :return: None
+    :return: updated page id
     """
     LOGGER.info('Updating page...')
 
@@ -575,6 +579,7 @@ def update_page(page_id, title, body, version, ancestors, filepath):
         LOGGER.info('URL: %s', link)
         if GO_TO_PAGE:
             webbrowser.open(link)
+        return data[u'id']
     else:
         LOGGER.error("Page could not be updated.")
 
@@ -779,23 +784,11 @@ def create_dir_landing_page(dir_landing_page_file, directory, ancestors):
     if SIMULATE:
         log_html(html, landing_page_title)
         return []
-    elif ancestor_page:
-        handle_not_cleared_page(ancestor_page, landing_page_title)
 
-    page_id = create_page(landing_page_title, html, ancestors, landing_page_doc_file)
+    page_id = create_or_update_page(landing_page_title, html, ancestors, landing_page_doc_file)
     page_as_ancestor = get_page_as_ancestor(page_id)
 
     return page_as_ancestor
-
-
-def handle_not_cleared_page(page, title):
-    LOGGER.warning('Page not cleared before recreating pages, because it is not a child page of Documentation: %s', title)
-    input_value = input('Type \'yes\' if you wish to delete the page. \n')
-    if input_value == 'yes':
-        delete_page(page.id)
-    else:
-        LOGGER.error('Can not create page with title %s, because a page with the same title already exists in this space', title)
-        sys.exit(1)
 
 
 def create_dir_landing_page_recursively(directory):
@@ -858,26 +851,26 @@ def main():
 
     doc_file = get_landing_page_doc_file(DOCUMENTATION_ROOT)
     doc_landing_page_title = get_title(doc_file)
-    if not SIMULATE:
+    original_child_pages = []
+    if SIMULATE:
+        html = get_html(doc_file)
+        log_html(html, doc_landing_page_title)
+    else:
         doc_landing_page = get_page(doc_landing_page_title)
-        original_child_pages = []
         if doc_landing_page:
             original_child_pages.append(doc_landing_page_title)
             original_child_pages = get_child_page_ids(doc_landing_page.id)
-            delete_page(doc_landing_page.id)
         LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
 
-        [delete_page(page_id) for page_id in original_child_pages]
         if DELETE:
+            [delete_page(page_id) for page_id in original_child_pages]
             LOGGER.info('The pages deleted successfully.')
             sys.exit(1)
 
         create_dir_landing_page(doc_file, DOCUMENTATION_ROOT, get_page_as_ancestor(ANCESTOR))
-    else:
-        html = get_html(doc_file)
-        log_html(html, doc_landing_page_title)
 
     directories = get_subdirectories_recursively(DOCUMENTATION_ROOT)
+    active_pages = []
     for directory in directories:
         dir_landing_page_file = get_landing_page_doc_file(directory)
         if SIMULATE:
@@ -886,24 +879,24 @@ def main():
             log_html(html, dir_landing_page_title)
         else:
             dir_landing_as_ancestor = create_dir_landing_page_recursively(directory)
+            active_pages.append(dir_landing_as_ancestor[0][u'id'])
 
         for file in os.scandir(directory):
             if file.path.endswith('.md') and not file.path.endswith(DOCUMENTATION_TEMPLATE):
                 LOGGER.info('Markdown file:\t%s', file.name)
                 title = get_title(file.path)
-
-                LOGGER.info('Checking if Atlas page exists...')
-                page = get_page(title)
-
                 html = get_html(file.path)
+
                 if SIMULATE:
                     log_html(html, title)
                 else:
-                    if page:
-                        handle_not_cleared_page(page, title)
+                    page_id = create_or_update_page(title, html, dir_landing_as_ancestor, file.path)
+                    active_pages.append(page_id)
+                    continue
 
-                    create_page(title, html, dir_landing_as_ancestor, file.path)
-                continue
+    for original_child_page in original_child_pages:
+        if original_child_page not in active_pages:
+            delete_page(original_child_page)
 
     if SIMULATE:
         LOGGER.info("Simulate mode completed successfully.")
