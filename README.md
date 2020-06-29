@@ -8,7 +8,9 @@ Also there is support for some custom markdown tags for use with commonly used C
 Each file will be converted into HTML or Confluence storage markup when required.
 Then a page will be created or updated in the space.
 The hierarchy of the Confluence pages will mirror the folder structure under docs.
-Every folder has to have a markdown file under docs with the same name as the folder, to allow generating a corresponding page in the hierarchy. 
+Every folder has to have a markdown file under docs with the same name as the folder, to allow generating a corresponding page in the hierarchy.
+If a file is deleted, then running the tool will also remove the Confluence page.
+When a file is moved, then it takes about 24 hours for Confluence to rebuild the ancestor tree, so the change does not show up immediately.
 
 ### Configuration
 
@@ -83,8 +85,11 @@ Use **-h** to view a list of all available options.
 
 #### Other Uses
 
-Use **-d** or **--delete** to stop after deleting every page under Documentation. 
-If a page is moved from under Documentation in the hierarchy, then the tool will not delete it.
+Use **-a** or **--ancestor** to specify a parent page by its id, under which every other page will be created or updated.
+
+Use **-d** or **--delete** to delete pages that are under the parent folder specified by the **--ancestor** parameter.
+
+Use **-c** or **--contentss** to generate a contents page.
 
 Use **-n** or **--nossl** to specify a non-SSL url, i.e. **<http://>** instead of **<https://>**.
 
