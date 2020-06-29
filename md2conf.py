@@ -652,6 +652,19 @@ def upload_attachment(page_id, file, comment):
     return True
 
 
+def remove_collapsible_headings(read):
+    """
+    Removes collapsible headings from markdown read from file
+    :param read: raw markdown read from file
+    :return: markdown without tags for collapsible headings
+    """
+    read = read.replace('<details>', '')
+    read = read.replace('</details>', '')
+    read = read.replace('<summary>', '')
+    read = read.replace('</summary>', '')
+    return read
+
+
 def get_html(filepath):
     """
     Generate html from md file
@@ -661,6 +674,7 @@ def get_html(filepath):
     """
     with codecs.open(filepath, 'r', 'utf-8') as mdfile:
         read = mdfile.read()
+        read = remove_collapsible_headings(read)
         html = markdown.markdown(read, extensions=['markdown.extensions.tables',
                                                    'markdown.extensions.fenced_code',
                                                    'markdown.extensions.sane_lists'])
