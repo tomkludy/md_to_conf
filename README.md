@@ -89,7 +89,7 @@ Use **-a** or **--ancestor** to specify a parent page by its id, under which eve
 
 Use **-d** or **--delete** to delete pages that are under the parent folder specified by the **--ancestor** parameter.
 
-Use **-c** or **--contentss** to generate a contents page.
+Use **-c** or **--contents** to generate a contents page.
 
 Use **-n** or **--nossl** to specify a non-SSL url, i.e. **<http://>** instead of **<https://>**.
 

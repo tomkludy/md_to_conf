@@ -326,27 +326,27 @@ def get_page(title):
     return False
 
 
-def get_child_page_ids(page_id):
+def get_child_pages(page_id):
     """
      Retrieve details of the child pages by page id
 
     :param page_id: page id
-    :return: the id of every child pages
+    :return: the ids of the direct child pages
     """
     LOGGER.info('\tRetrieving information of original child pages: %s', page_id)
-    page_ids = get_all_child_pages(page_id)
+    page_ids = get_direct_child_pages(page_id)
 
     for page_id in page_ids:
-        child_pages = get_all_child_pages(page_id)
+        child_pages = get_direct_child_pages(page_id)
         if child_pages:
             page_ids.extend(child_pages)
 
     return page_ids
 
 
-def get_all_child_pages(page_id):
+def get_direct_child_pages(page_id):
     """
-     Retrieve every child page id
+     Retrieve every direct child page id
 
     :param page_id: page id
     :return: ids of immediate child pages
@@ -819,15 +819,16 @@ def create_dir_landing_page_recursively(directory):
     dir_landing_page_file = get_landing_page_doc_file(directory)
 
     if ancestor_page:
-        page_as_ancestor = get_or_create_page(ancestor_page, dir_landing_page_file, directory)
+        page_as_ancestor = get_or_create_page(ancestor_page, dir_landing_page_file)
     else:
         ancestor_of_page = create_dir_landing_page_recursively(ancestor_landing_page_dir)
-        page_as_ancestor = get_or_create_page(ancestor_of_page, dir_landing_page_file, directory)
+        page_as_ancestor = get_or_create_page(ancestor_of_page, dir_landing_page_file)
 
     return page_as_ancestor
 
 
-def get_or_create_page(ancestor_page, dir_landing_page_file, directory):
+def get_or_create_page(ancestor_page, directory):
+    dir_landing_page_file = get_landing_page_doc_file(directory)
     title = get_title(dir_landing_page_file)
     page = get_page(title)
     if page:
@@ -873,7 +874,7 @@ def main():
         doc_landing_page = get_page(doc_landing_page_title)
         if doc_landing_page:
             original_child_pages.append(doc_landing_page_title)
-            original_child_pages = get_child_page_ids(doc_landing_page.id)
+            original_child_pages = get_child_pages(doc_landing_page.id)
         LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
 
         if DELETE:
@@ -908,13 +909,13 @@ def main():
                     active_pages.append(page_id)
                     continue
 
-    for original_child_page in original_child_pages:
-        if original_child_page not in active_pages:
-            delete_page(original_child_page)
-
     if SIMULATE:
         LOGGER.info("Simulate mode completed successfully.")
     else:
+        for original_child_page in original_child_pages:
+            if original_child_page not in active_pages:
+                delete_page(original_child_page)
+
         LOGGER.info('Markdown Converter completed successfully.')
 
 
