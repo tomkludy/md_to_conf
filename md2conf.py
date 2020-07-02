@@ -69,7 +69,6 @@ try:
     LOGGER.setLevel(getattr(logging, ARGS.loglevel.upper(), None))
 
     DOCUMENTATION_ROOT = ARGS.folder
-    DOCUMENTATION_TEMPLATE = 'template.md'
     LOG_FILE_NAME = 'logs_' + datetime.now().strftime("%Y_%m_%d-%H_%M") + '.txt'
     LOG_FOLDER = 'logs/'
     LOG_FILE = LOG_FOLDER + LOG_FILE_NAME
@@ -897,7 +896,7 @@ def main():
             active_pages.append(dir_landing_as_ancestor[0][u'id'])
 
         for file in os.scandir(directory):
-            if file.path.endswith('.md') and not file.path.endswith(DOCUMENTATION_TEMPLATE):
+            if file.path.endswith('.md'):
                 LOGGER.info('Markdown file:\t%s', file.name)
                 title = get_title(file.path)
                 html = get_html(file.path)
