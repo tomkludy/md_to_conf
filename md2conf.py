@@ -339,6 +339,8 @@ def get_child_pages(page_id):
         child_pages = get_direct_child_pages(page_id)
         if child_pages:
             page_ids.extend(child_pages)
+            for child_page_id in child_pages:
+                get_child_pages(child_page_id)
 
     return page_ids
 
@@ -872,6 +874,7 @@ def main():
         doc_landing_page = get_page(doc_landing_page_title)
         if doc_landing_page:
             original_child_pages = get_child_pages(doc_landing_page.id)
+            original_child_pages.append(doc_landing_page.id)
         LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
 
         if DELETE:
