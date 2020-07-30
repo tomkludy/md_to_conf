@@ -330,7 +330,7 @@ def get_child_pages(page_id):
      Retrieve details of the child pages by page id
 
     :param page_id: page id
-    :return: the ids of the direct child pages
+    :return: the ids of all the child pages
     """
     LOGGER.info('\tRetrieving information of original child pages: %s', page_id)
     page_ids = get_direct_child_pages(page_id)
@@ -815,13 +815,12 @@ def create_dir_landing_page_recursively(directory):
     ancestor_landing_page_file = get_landing_page_doc_file(ancestor_landing_page_dir)
     ancestor_landing_page_title = get_title(ancestor_landing_page_file)
     ancestor_page = get_page(ancestor_landing_page_title)
-    dir_landing_page_file = get_landing_page_doc_file(directory)
 
     if ancestor_page:
-        page_as_ancestor = get_or_create_page(ancestor_page, dir_landing_page_file)
+        page_as_ancestor = get_or_create_page(ancestor_page, directory)
     else:
         ancestor_of_page = create_dir_landing_page_recursively(ancestor_landing_page_dir)
-        page_as_ancestor = get_or_create_page(ancestor_of_page, dir_landing_page_file)
+        page_as_ancestor = get_or_create_page(ancestor_of_page, directory)
 
     return page_as_ancestor
 
@@ -872,7 +871,6 @@ def main():
     else:
         doc_landing_page = get_page(doc_landing_page_title)
         if doc_landing_page:
-            original_child_pages.append(doc_landing_page_title)
             original_child_pages = get_child_pages(doc_landing_page.id)
         LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
 
@@ -908,14 +906,17 @@ def main():
                     active_pages.append(page_id)
                     continue
 
-    if SIMULATE:
-        LOGGER.info("Simulate mode completed successfully.")
-    else:
         for original_child_page in original_child_pages:
             if original_child_page not in active_pages:
-                delete_page(original_child_page)
+                if SIMULATE:
+                    LOGGER.info("Original page with page id %s has no markdown file to update from, so it will be deleted.", original_child_page)
+                else:
+                    delete_page(original_child_page)
 
-        LOGGER.info('Markdown Converter completed successfully.')
+        if SIMULATE:
+            LOGGER.info("Simulate mode completed successfully.")
+        else:
+            LOGGER.info('Markdown Converter completed successfully.')
 
 
 if __name__ == "__main__":
