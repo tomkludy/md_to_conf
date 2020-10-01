@@ -1,21 +1,26 @@
-# Markdown to Confluence Converter
+# Documentation
+## Markdown to Confluence Converter
 
-A script to import a named markdown document into Confluence.
+A script to import every markdown document under the dagrofa-merkur/docs folder into Confluence.
 It handles inline images as well as code blocks.
 Also there is support for some custom markdown tags for use with commonly used Confluence macros.
 
-The file will be converted into HTML or Confluence storage markup when required.
-Then a page will be created in the space or if it already exists, the page will be uploaded.
+Each file will be converted into HTML or Confluence storage markup when required.
+Then a page will be created or updated in the space.
+The hierarchy of the Confluence pages will mirror the folder structure under docs.
+Every folder has to have a markdown file under docs with the same name as the folder, to allow generating a corresponding page in the hierarchy.
+If a file is deleted, then running the tool will also remove the Confluence page.
+When a file is moved, then it takes about 24 hours for Confluence to rebuild the ancestor tree, so the change does not show up immediately.
 
-## Configuration
+### Configuration
 
 [Download](https://github.com/rittmanmead/md_to_conf)
 
-## Requirements
+### Requirements
 
 Python 3.6+
 
-### Python venv
+#### Python venv
 
 The project code and dependencies can be used based on python virtualenv.
 
@@ -31,7 +36,7 @@ Make the virtualenv active:
 > source venv/bin/activate
 ```
 
-### Dependencies
+#### Dependencies
 
 Required python dependencies can be installed using:
 
@@ -39,7 +44,7 @@ Required python dependencies can be installed using:
 pip3 install -r requirements.txt
 ```
 
-### Environment Variables
+#### Environment Variables
 
 To use it, you will need your Confluence username, API key and organisation name.
 To generate an API key go to [https://id.atlassian.com/manage/api-tokens](https://id.atlassian.com/manage/api-tokens).
@@ -61,16 +66,11 @@ export CONFLUENCE_ORGNAME='fawltytowers'
 
 On Windows, this can be set via system properties.
 
-## Use
+### Use
 
-### Basic
+#### Basic
 
-The minimum accepted parameters are the markdown file to upload as well as the Confluence space key you wish to upload to. For the following examples assume 'Test Space' with key: `TST`.
-
-```less
-python3 md2conf.py readme.md TST
-```
-
+The minimum accepted parameters are the username, the API key, the organisation name as well as the Confluence space key you wish to upload to. 
 Mandatory Confluence parameters can also be set here if not already set as environment variables:
 
 * **-u** **--username**: Confluence User
@@ -78,33 +78,30 @@ Mandatory Confluence parameters can also be set here if not already set as envir
 * **-o** **--orgname**: Confluence Organisation
 
 ```less
-python3 md2conf.py readme.md TST -u basil -p abc123 -o fawltytowers
+python3 md2conf.py Test-Space --username your.username@aliz.ai --orgname sgjira
 ```
 
 Use **-h** to view a list of all available options.
 
-### Other Uses
+#### Other Uses
 
-Use **-a** or **--ancestor** to designate the name of a page which the page should be created under.
+Use **-a** or **--ancestor** to specify a parent page by its id, under which every other page will be created or updated.
 
-```less
-python md2conf.py readme.md TST -a "Parent Page Name"
-```
+Use **-d** or **--delete** to delete pages that are under the parent folder specified by the **--ancestor** parameter.
 
-Use **-d** or **--delete** to delete the page instead of create it. Obviously this won't work if it doesn't already exist.
+Use **-c** or **--contents** to generate a contents page.
 
 Use **-n** or **--nossl** to specify a non-SSL url, i.e. **<http://>** instead of **<https://>**.
 
 Use **-l** or **--loglevel** to specify a different logging level, i.e **DEBUG**.
 
-Use **-s** or **--simulate** to stop processing before interacting with confluence API, i.e. only
- converting the markdown document to confluence format.
+Use **-s** or **--simulate** to stop processing before interacting with confluence API, i.e. only converting the markdown documents to confluence format and writing the html to a log file.
 
-## Markdown
+### Markdown
 
 The original markdown to HTML conversion is performed by the Python **markdown** library.
-Additionally, the page name is taken from the first line of  the markdown file, usually assumed to be the title.
-In the case of this document, the page would be called: **Markdown to Confluence Converter**.
+Additionally, the page name is taken from the first line of each markdown file, usually assumed to be the title.
+In the case of this document, the page would be called: **Documentation**.
 
 Standard markdown syntax for images and code blocks will be automatically converted.
 The images are uploaded as attachments and the references updated in the HTML.
@@ -137,7 +134,7 @@ will be replaced by confluence "toc" macro leading to something like:
     </p>
 ```
 
-### Information, Note and Warning Macros
+#### Information, Note and Warning Macros
 
 > **Warning:** Any blockquotes used will implement an information macro. This could potentially harm your formatting.
 
@@ -169,16 +166,4 @@ Alternatively, using a custom Markdown syntax also works:
 ~!This is a note.!~
 
 ~%This is a warning.%~
-```
-
-## Miscellaneous
-
-```less
-    ╚⊙ ⊙╝
-  ╚═(███)═╝
- ╚═(███)═╝
-╚═(███)═╝
- ╚═(███)═╝
-  ╚═(███)═╝
-   ╚═(███)═╝
 ```
