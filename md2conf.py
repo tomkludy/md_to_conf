@@ -336,11 +336,9 @@ def get_child_pages(page_id):
     page_ids = get_direct_child_pages(page_id)
 
     for page_id in page_ids:
-        child_pages = get_direct_child_pages(page_id)
+        child_pages = get_child_pages(page_id)
         if child_pages:
             page_ids.extend(child_pages)
-            for child_page_id in child_pages:
-                get_child_pages(child_page_id)
 
     return page_ids
 
