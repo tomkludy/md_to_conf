@@ -17,6 +17,7 @@ import mimetypes
 import codecs
 import argparse
 import urllib
+import urllib.parse
 import webbrowser
 from pathlib import Path
 
@@ -406,9 +407,10 @@ def check_for_errors(response):
         sys.exit(1)
 
 
+IMAGE_LINK_PAGES = {}
 def add_images(page_id, html, filepath):
     """
-    Scan for images and upload as attachments if found
+    Scan for images and upload as attachments or child pages if found
 
     :param page_id: Confluence page id
     :param html: html string
@@ -417,20 +419,51 @@ def add_images(page_id, html, filepath):
     """
     source_folder = os.path.dirname(os.path.abspath(filepath))
 
+    # <img/> tags turn into attachments
     for tag in re.findall('<img(.*?)/>', html):
-        rel_path = re.search('src="(.*?)"', tag).group(1)
+        orig_rel_path = re.search('src="(.*?)"', tag).group(1)
         alt_text = re.search('alt="(.*?)"', tag).group(1)
+        rel_path = urllib.parse.unquote(orig_rel_path)
         abs_path = os.path.join(source_folder, rel_path)
         basename = os.path.basename(rel_path)
         upload_attachment(page_id, abs_path, alt_text)
         if re.search('http.*', rel_path) is None:
             if CONFLUENCE_API_URL.endswith('/wiki'):
-                html = html.replace('%s' % (rel_path),
+                html = html.replace('%s' % (orig_rel_path),
                                     '/wiki/download/attachments/%s/%s' % (page_id, basename))
             else:
-                html = html.replace('%s' % (rel_path),
+                html = html.replace('%s' % (orig_rel_path),
                                     '/download/attachments/%s/%s' % (page_id, basename))
-    return html
+
+    # <a href="<image>">[Name]</a> turns into a sub-page
+    ancestors = get_page_as_ancestor(page_id)
+    image_pages = []
+    for ref in re.findall(r'<a href=\"([^\"]+)\">([^<]+)</a>', html):
+        if not ref[0].startswith(('http', '/')) and ref[0].endswith('.png'):
+            dirname = os.path.abspath(os.path.dirname(filepath))
+            rel_image_from_page = os.path.join(dirname, ref[0])
+            image = os.path.normpath(rel_image_from_page)
+            alt = ref[1]
+            if image in IMAGE_LINK_PAGES:
+                page = IMAGE_LINK_PAGES[image]
+            else:
+                file = tempfile.NamedTemporaryFile(mode='w', delete=False)
+                title = urllib.parse.unquote(os.path.basename(image))
+                file.write('# %s\n' % title)
+                temp_dirname = os.path.abspath(os.path.dirname(file.name))
+                rel_image_from_temp = os.path.relpath(image, temp_dirname)
+                file.write('![%s](%s)\n' % (alt, rel_image_from_temp))
+                file.close()
+                title = get_title(file.name)
+                subhtml = get_html(file.name)
+                create_or_update_page(title, subhtml, ancestors, file.name)
+                os.remove(file.name)
+                page = get_page(title)
+                IMAGE_LINK_PAGES[image] = page
+            image_pages.append(page.id)
+            html = html.replace(ref[0], page.link)
+
+    return html, image_pages
 
 
 def add_contents(html):
@@ -463,7 +496,7 @@ def create_or_update_page(title, body, ancestors, filepath):
     :param body: confluence page content
     :param ancestors: confluence page ancestor
     :param filepath: markdown file full path
-    :return: created or updated page id
+    :return: created or updated page id, list of child image pages
     """
     page = get_page(title)
     if page:
@@ -511,8 +544,9 @@ def create_or_update_page(title, body, ancestors, filepath):
             img_check = re.search(r'<img(.*?)\/>', body)
             if img_check:
                 LOGGER.info('\tAttachments found, update procedure called.')
-                update_page(page_id, title, body, version, ancestors, filepath)
-            return page_id
+                return update_page(page_id, title, body, version, ancestors, filepath)
+            else:
+                return page_id, []
         else:
             LOGGER.error('Could not create page.')
             sys.exit(1)
@@ -551,13 +585,13 @@ def update_page(page_id, title, body, version, ancestors, filepath):
     :param version: confluence page version
     :param ancestors: confluence page ancestor
     :param filepath: markdown file full path
-    :return: updated page id
+    :return: updated page id, list of child image pages
     """
     LOGGER.info('Updating page...')
     CACHED_PAGE_INFO.pop(title, None)
 
     # Add images and attachments
-    body = add_images(page_id, body, filepath)
+    body, image_pages = add_images(page_id, body, filepath)
 
     url = '%s/rest/api/content/%s' % (CONFLUENCE_API_URL, page_id)
 
@@ -592,7 +626,7 @@ def update_page(page_id, title, body, version, ancestors, filepath):
 
         LOGGER.info("Page updated successfully.")
         LOGGER.info('URL: %s', link)
-        return data[u'id']
+        return data[u'id'], image_pages
     else:
         LOGGER.error("Page could not be updated.")
 
@@ -614,7 +648,8 @@ def update_page_refs_only(filepath):
 
     LOGGER.info('.. title: %s .. version: %d .. ancestor: %s ..', title, version, page.ancestor)
 
-    update_page(page.id, title, html, version, ancestors, filepath)
+    _, image_pages = update_page(page.id, title, html, version, ancestors, filepath)
+    return image_pages
 
 def get_attachment(page_id, filename):
     """
@@ -784,6 +819,8 @@ def log_html(html, title):
     log_file.write(html)
 
 
+TITLE_CACHE_BY_FILE = {}
+TITLES_USED = []
 def get_title(filepath):
     """
     Returns confluence page title extracted from the markdown file
@@ -791,9 +828,21 @@ def get_title(filepath):
     :param filepath: full path to  markdown file
     :return: confluence page title
     """
+    if filepath in TITLE_CACHE_BY_FILE:
+        return TITLE_CACHE_BY_FILE[filepath]
     with open(filepath, 'r') as mdfile:
         title = mdfile.readline().lstrip('#').strip()
         mdfile.seek(0)
+
+    basetitle = title
+    i = 0
+    while title in TITLES_USED:
+        i += 1
+        title = '%s (%d)' % (basetitle, i)
+
+    TITLE_CACHE_BY_FILE[filepath] = title
+    TITLES_USED.append(title)
+
     LOGGER.info('Title:\t\t%s', title)
     return title
 
@@ -849,9 +898,7 @@ def create_dir_landing_page(dir_landing_page_file, ancestors):
         log_html(html, landing_page_title)
         return []
 
-    page_id = create_or_update_page(landing_page_title, html, ancestors, dir_landing_page_file)
-
-    return page_id
+    return create_or_update_page(landing_page_title, html, ancestors, dir_landing_page_file)
 
 
 def does_path_contain(directory, predicate):
@@ -899,8 +946,9 @@ def upload_folder(directory, ancestors):
             if SIMULATE:
                 log_html(html, title)
             else:
-                page_id = create_or_update_page(title, html, ancestors, file.path)
+                page_id, image_pages = create_or_update_page(title, html, ancestors, file.path)
                 active_pages.append(page_id)
+                active_pages.extend(image_pages)
                 if dir_landing_as_ancestors is None or \
                     os.path.basename(file).lower() == 'readme.md':
                     dir_landing_as_ancestors = get_page_as_ancestor(page_id)
@@ -908,8 +956,9 @@ def upload_folder(directory, ancestors):
     # If we didn't get any landing page at all, then we must create one
     if dir_landing_as_ancestors is None and not SIMULATE:
         doc_file = get_landing_page_doc_file(directory)
-        dir_landing_page_id = create_dir_landing_page(doc_file, ancestors)
+        dir_landing_page_id, image_pages = create_dir_landing_page(doc_file, ancestors)
         active_pages.append(dir_landing_page_id)
+        active_pages.extend(image_pages)
         dir_landing_as_ancestors = get_page_as_ancestor(dir_landing_page_id)
 
     # Walk through all subdirectories and recursively upload them,
@@ -940,8 +989,6 @@ def main():
     for child in direct_child_pages:
         original_child_pages[child] = get_child_pages(child)
 
-    LOGGER.info("child pages done")
-
     # upload everything under the ancestor
     root_ancestors = get_page_as_ancestor(ANCESTOR)
     active_pages = upload_folder(DOCUMENTATION_ROOT, root_ancestors)
@@ -951,7 +998,7 @@ def main():
     if len(RESOLVE_REFS_AGAIN) > 0:
         LOGGER.info('-- Attempting to resolve cross-references --')
         for page in RESOLVE_REFS_AGAIN:
-            update_page_refs_only(page)
+            active_pages.extend(update_page_refs_only(page))
 
     # remove any pages that are no longer needed; any top-level
     # page under the ancestor, and its children, are spared; but
