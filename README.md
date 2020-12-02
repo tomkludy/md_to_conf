@@ -1,7 +1,7 @@
 # Documentation
 ## Markdown to Confluence Converter
 
-A script to import every markdown document under the dagrofa-merkur/docs folder into Confluence.
+A script to import every markdown document under a specified folder into Confluence.
 It handles inline images as well as code blocks.
 Also there is support for some custom markdown tags for use with commonly used Confluence macros.
 
@@ -12,90 +12,83 @@ Every folder has to have a markdown file under docs with the same name as the fo
 If a file is deleted, then running the tool will also remove the Confluence page.
 When a file is moved, then it takes about 24 hours for Confluence to rebuild the ancestor tree, so the change does not show up immediately.
 
-### Configuration
+### Use
 
-[Download](https://github.com/rittmanmead/md_to_conf)
+#### Prerequisites
 
-### Requirements
+Windows:
+* [Windows Subsystem for Linux 2 (WSL2)](https://docs.microsoft.com/en-us/windows/wsl/install-win10)
+* [Docker Desktop](https://docker.com)
 
-Python 3.6+
+macOS:
+* [Docker Desktop](https://docker.com)
 
-#### Python venv
+Linux:
+* [Docker Engine](https://docker.com)
 
-The project code and dependencies can be used based on python virtualenv.
+#### Set up authentication
 
-Create a new python virtualenv:
-
-```less
-> python3 -m venv venv
-```
-
-Make the virtualenv active:
-
-```less
-> source venv/bin/activate
-```
-
-#### Dependencies
-
-Required python dependencies can be installed using:
-
-```less
-pip3 install -r requirements.txt
-```
-
-#### Environment Variables
-
-To use it, you will need your Confluence username, API key and organisation name.
+You will need your Confluence username, and either your password or an API key.
 To generate an API key go to [https://id.atlassian.com/manage/api-tokens](https://id.atlassian.com/manage/api-tokens).
 
-You will also need the organization name that is used in the subdomain.
-For example the URL: `https://fawltytowers.atlassian.net/wiki/` would indicate an organization name of **fawltytowers**.
+These can be set as command-line parameters; however, it is recommended that these instead should be set in a `confluence.env` file and passed into the `docker run --env-file confluence.env ...` command.  The `confluence.env` file should then be excluded from checking into source control in order to keep the credentials secret.  This also prevents the credentials from appearing in your shell history.
 
-If the organization name contains a dot, it will be considered as a Fully Qualified Domain Name.
-For example the URL: `https://fawltytowers.mydomain.com/` would indicate an organization name of **fawltytowers.mydomain.com**.
+Additionally, you will need to know your organization name.
+* If you are using Confluence Cloud, you will need the organization name that is used in the subdomain.
+For example, if you normally access the URL: `https://fawltytowers.atlassian.net/wiki/` then the organization name is **fawltytowers**.
+* If you are using Confluence On-Prem, you will need the Fully Qualified Domain Name of your server.
+For example, if you normally access the URL: `https://fawltytowers.mydomain.com/` then the organization name is **fawltytowers.mydomain.com**.
 
-These can be specified at runtime or set as Confluence environment variables
-(e.g. add to your `~/.profile` or `~/.bash_profile` on Mac OS):
-
+The `confluence.env` file should look like:
 ``` bash
-export CONFLUENCE_USERNAME='basil'
-export CONFLUENCE_API_KEY='abc123'
-export CONFLUENCE_ORGNAME='fawltytowers'
+CONFLUENCE_USERNAME='basil'
+CONFLUENCE_API_KEY='abc123'
+CONFLUENCE_ORGNAME='fawltytowers`
 ```
 
-On Windows, this can be set via system properties.
+#### Additional requirements
+
+Within Confluence, you will need to know a parent page ID under which to publish the pages that are uploaded.  Finding this in the Confluence web UI can be a bit tricky; here's how you can do it:
+
+1. Navigate to the page that you want to be the root page in your browser
+2. Click the "three dots" menu near the upper right of the page
+3. Right-click and _Copy Link_ (don't left-click) the "Page History" link; this should be something like `https://fawltytowers.mydomain.com/pages/viewpreviousversions.action?pageId=1234567890`
+4. Extract the `pageId` query parameter; in this example it is **1234567890**
 
 ### Use
 
 #### Basic
 
-The minimum accepted parameters are the username, the API key, the organisation name as well as the Confluence space key you wish to upload to. 
-Mandatory Confluence parameters can also be set here if not already set as environment variables:
+The minimum accepted parameters are:
 
-* **-u** **--username**: Confluence User
-* **-p** **--apikey**: Confluence API Key
-* **-o** **--orgname**: Confluence Organisation
+* The authentication parameters, preferably contained within a `.env` file (see above)
+* The folder containing .md files to upload; this must be mapped into the container as a volume at the `/publish` mount point
+* The Confluence space key you wish to upload to
+* The ancestor page id, under which all files will be uploaded
 
-```less
-python3 md2conf.py Test-Space --username your.username@aliz.ai --orgname sgjira
+```bash
+docker run --rm \
+    --env-file confluence.env `# authentication parameters in confluence.env file` \
+    -v $(cwd):/publish        `# publishes current working directory and subdirectories` \
+    tomkludy/md_to_conf \
+    Test-Space                `# Confluence space key to publish to` \
+    -a 1234567890             `# ancestor page id`
 ```
 
-Use **-h** to view a list of all available options.
+#### Command line arguments
 
-#### Other Uses
+|  | Parameter | Usage |
+|-|-|-|
+| &#8209;u | &#8209;&#8209;username | *Required*. Confluence username if `CONFLUENCE_USERNAME` is not set in the environment file. |
+| &#8209;p | &#8209;&#8209;apikey | *Required*. Confluence password or API key if `CONFLUENCE_API_KEY` is not set in the environment file. |
+| &#8209;o | &#8209;&#8209;orgname | *Required*. Confluence organization name if `CONFLUENCE_ORGNAME` is not set in the environment file.  If orgname contains a dot, it will be considered as the fully qualified domain name. |
+| &#8209;a | &#8209;&#8209;ancestor | *Required*. The id of the parent page under which every other page will be created or updated. |
+|  | &#8209;&#8209;note | Specifies a note to prepend on generated html pages.  Useful to indicate to the user that the page is generated. |
+| &#8209;n | &#8209;&#8209;nossl | If specified, will use HTTP instead of HTTPS. |
+| &#8209;l | &#8209;&#8209;loglevel | Set the log verbosity.  Default: `INFO` |
+| &#8209;s | &#8209;&#8209;simulate | Only show conversion result, without uploading. |
 
-Use **-a** or **--ancestor** to specify a parent page by its id, under which every other page will be created or updated.
-
-Use **-d** or **--delete** to delete pages that are under the parent folder specified by the **--ancestor** parameter.
-
-Use **-c** or **--contents** to generate a contents page.
-
-Use **-n** or **--nossl** to specify a non-SSL url, i.e. **<http://>** instead of **<https://>**.
-
-Use **-l** or **--loglevel** to specify a different logging level, i.e **DEBUG**.
-
-Use **-s** or **--simulate** to stop processing before interacting with confluence API, i.e. only converting the markdown documents to confluence format and writing the html to a log file.
+> Note: There are some additional undocumented options available, which may be complex to use from within docker.  Use `docker run --rm tomkludy/md_to_conf -h` to view a list of all available options.
 
 ### Markdown
 

@@ -1,18 +1,15 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """
 # --------------------------------------------------------------------------------------------------
 # Rittman Mead Markdown to Confluence Tool
 # --------------------------------------------------------------------------------------------------
 # Create or Update Atlas pages remotely using markdown files.
-#
-# --------------------------------------------------------------------------------------------------
-# Usage: rest_md2conf.py markdown spacekey
-# --------------------------------------------------------------------------------------------------
 """
 
 import logging
 import sys
 import os
+import tempfile
 import re
 import json
 import collections
@@ -34,7 +31,6 @@ LOGGER = logging.getLogger(__name__)
 
 # ArgumentParser to parse arguments and options
 PARSER = argparse.ArgumentParser()
-PARSER.add_argument("folder", help="Full path of the documentation folder to convert and upload.")
 PARSER.add_argument('spacekey',
                     help="Confluence Space key for the page. ")
 PARSER.add_argument('-u', '--username', help='Confluence username if $CONFLUENCE_USERNAME not set.')
@@ -45,11 +41,13 @@ PARSER.add_argument('-o', '--orgname',
                          'If orgname contains a dot, considered as the fully qualified domain name.'
                          'e.g. https://XXX')
 PARSER.add_argument('-a', '--ancestor',
-                    help='The id of the parent page under which every other page will be created or updated. You can find the id in the URL.')
+                    help='The id of the parent page under which every other page will be created '
+                         'or updated. You can find the id in the URL.')
+PARSER.add_argument('-f', '--folder',
+                    help='Full path of the documentation folder to convert and upload.  Defaults '
+                         'to current working directory.')
 PARSER.add_argument('-c', '--contents', action='store_true', default=False,
                     help='Use this option to generate a contents page.')
-PARSER.add_argument('-g', '--nogo', action='store_true', default=False,
-                    help='Use this option to skip navigation after upload.')
 PARSER.add_argument('-n', '--nossl', action='store_true', default=False,
                     help='Use this option if NOT using SSL. Will use HTTP instead of HTTPS.')
 PARSER.add_argument('-d', '--delete', action='store_true', default=False,
@@ -60,6 +58,8 @@ PARSER.add_argument('-s', '--simulate', action='store_true', default=False,
                     help='Use this option to only show conversion result.')
 PARSER.add_argument('-ht', '--loghtml', action='store_true', default=False,
                     help='Use this option to log generated html pages in separate files.')
+PARSER.add_argument('--note',
+                    help='Use this option to specify a note to prepend on generated html pages.')
 
 ARGS = PARSER.parse_args()
 
@@ -82,8 +82,11 @@ try:
     DELETE = ARGS.delete
     SIMULATE = ARGS.simulate
     LOG_HTML = ARGS.loghtml
-    GO_TO_PAGE = not ARGS.nogo
     CONTENTS = ARGS.contents
+    NOTE = ARGS.note
+
+    if DOCUMENTATION_ROOT is None:
+        DOCUMENTATION_ROOT = os.getcwd()
 
     if USERNAME is None:
         LOGGER.error('Error: Username not specified by environment variable or option.')
@@ -97,7 +100,8 @@ try:
         SPACE_KEY = '~%s' % (USERNAME)
 
     if ANCESTOR is None:
-        LOGGER.error('Error: The ancestor page is not specified under which the documentation should be created.')
+        LOGGER.error('Error: The ancestor page is not specified under which the documentation '
+                     'should be created.')
         sys.exit(1)
 
     if ORGNAME is not None:
@@ -112,7 +116,10 @@ try:
     if NOSSL:
         CONFLUENCE_API_URL.replace('https://', 'http://')
 
-except Exception as err:
+    RESOLVE_REFS_AGAIN = []
+    CACHED_PAGE_INFO = {}
+
+except Exception as err: # pylint: disable=broad-except
     LOGGER.error('\n\nException caught:\n%s ', err)
     LOGGER.error('\nFailed to process command line arguments. Exiting.')
     sys.exit(1)
@@ -227,7 +234,7 @@ def convert_doctoc(html):
     </ac:structured-macro>
     </p>'''
 
-    html = re.sub('\<\!\-\- START doctoc.*END doctoc \-\-\>', toc_tag, html, flags=re.DOTALL)
+    html = re.sub(r'\<\!\-\- START doctoc.*END doctoc \-\-\>', toc_tag, html, flags=re.DOTALL)
 
     return html
 
@@ -240,14 +247,14 @@ def strip_type(tag, tagtype):
     :param tagtype: tag type
     :return: modified tag
     """
-    tag = re.sub('%s:\s' % tagtype, '', tag.strip(), re.IGNORECASE)
-    tag = re.sub('%s\s:\s' % tagtype, '', tag.strip(), re.IGNORECASE)
-    tag = re.sub('<.*?>%s:\s<.*?>' % tagtype, '', tag, re.IGNORECASE)
-    tag = re.sub('<.*?>%s\s:\s<.*?>' % tagtype, '', tag, re.IGNORECASE)
-    tag = re.sub('<(em|strong)>%s:<.*?>\s' % tagtype, '', tag, re.IGNORECASE)
-    tag = re.sub('<(em|strong)>%s\s:<.*?>\s' % tagtype, '', tag, re.IGNORECASE)
-    tag = re.sub('<(em|strong)>%s<.*?>:\s' % tagtype, '', tag, re.IGNORECASE)
-    tag = re.sub('<(em|strong)>%s\s<.*?>:\s' % tagtype, '', tag, re.IGNORECASE)
+    tag = re.sub(r'%s:\s' % tagtype, '', tag.strip(), re.IGNORECASE)
+    tag = re.sub(r'%s\s:\s' % tagtype, '', tag.strip(), re.IGNORECASE)
+    tag = re.sub(r'<.*?>%s:\s<.*?>' % tagtype, '', tag, re.IGNORECASE)
+    tag = re.sub(r'<.*?>%s\s:\s<.*?>' % tagtype, '', tag, re.IGNORECASE)
+    tag = re.sub(r'<(em|strong)>%s:<.*?>\s' % tagtype, '', tag, re.IGNORECASE)
+    tag = re.sub(r'<(em|strong)>%s\s:<.*?>\s' % tagtype, '', tag, re.IGNORECASE)
+    tag = re.sub(r'<(em|strong)>%s<.*?>:\s' % tagtype, '', tag, re.IGNORECASE)
+    tag = re.sub(r'<(em|strong)>%s\s<.*?>:\s' % tagtype, '', tag, re.IGNORECASE)
     string_start = re.search('<.*?>', tag)
     tag = upper_chars(tag, [string_start.end()])
     return tag
@@ -272,7 +279,7 @@ def process_refs(html):
     :param html: html string
     :return: modified html string
     """
-    refs = re.findall('\n(\[\^(\d)\].*)|<p>(\[\^(\d)\].*)', html)
+    refs = re.findall(r'\n(\[\^(\d)\].*)|<p>(\[\^(\d)\].*)', html)
 
     if refs:
 
@@ -301,6 +308,9 @@ def get_page(title):
     :param title: page tile
     :return: Confluence page info
     """
+    if title in CACHED_PAGE_INFO:
+        return CACHED_PAGE_INFO[title]
+
     LOGGER.info('\tRetrieving page information: %s', title)
     url = '%s/rest/api/content?title=%s&spaceKey=%s&expand=version,ancestors' % (
         CONFLUENCE_API_URL, urllib.parse.quote_plus(title), SPACE_KEY)
@@ -317,14 +327,17 @@ def get_page(title):
         page_id = data[u'results'][0][u'id']
         version_num = data[u'results'][0][u'version'][u'number']
         link = '%s%s' % (CONFLUENCE_API_URL, data[u'results'][0][u'_links'][u'webui'])
+        ancestor = data[u'results'][0][u'ancestors'][-1][u'id']
 
-        page_info = collections.namedtuple('PageInfo', ['id', 'version', 'link'])
-        page = page_info(page_id, version_num, link)
+        page_info = collections.namedtuple('PageInfo', ['id', 'version', 'link', 'ancestor'])
+        page = page_info(page_id, version_num, link, ancestor)
+        CACHED_PAGE_INFO[title] = page
         return page
 
     return False
 
 
+CHILD_PAGES_CACHE = {}
 def get_child_pages(page_id):
     """
      Retrieve details of the child pages by page id
@@ -332,14 +345,18 @@ def get_child_pages(page_id):
     :param page_id: page id
     :return: the ids of all the child pages
     """
+    if page_id in CHILD_PAGES_CACHE:
+        return CHILD_PAGES_CACHE[page_id]
+
     LOGGER.info('\tRetrieving information of original child pages: %s', page_id)
     page_ids = get_direct_child_pages(page_id)
 
     for page_id in page_ids:
         child_pages = get_child_pages(page_id)
         if child_pages:
-            page_ids.extend(child_pages)
+            page_ids = page_ids + list(set(child_pages) - set(page_ids))
 
+    CHILD_PAGES_CACHE[page_id] = page_ids
     return page_ids
 
 
@@ -350,7 +367,8 @@ def get_direct_child_pages(page_id):
     :param page_id: page id
     :return: ids of immediate child pages
     """
-    url = '%s/rest/api/content/search?cql=parent=%s' % (CONFLUENCE_API_URL, urllib.parse.quote_plus(page_id))
+    url = '%s/rest/api/content/search?cql=parent=%s' % \
+          (CONFLUENCE_API_URL, urllib.parse.quote_plus(page_id))
 
     session = requests.Session()
     session.auth = (USERNAME, API_KEY)
@@ -424,14 +442,14 @@ def add_contents(html):
     """
     contents_markup = '<ac:structured-macro ac:name="toc">\n<ac:parameter ac:name="printable">' \
                       'true</ac:parameter>\n<ac:parameter ac:name="style">disc</ac:parameter>'
-    contents_markup = contents_markup + '<ac:parameter ac:name="maxLevel">5</ac:parameter>\n' \
-                                        '<ac:parameter ac:name="minLevel">1</ac:parameter>'
-    contents_markup = contents_markup + '<ac:parameter ac:name="class">rm-contents</ac:parameter>\n' \
-                                        '<ac:parameter ac:name="exclude"></ac:parameter>\n' \
-                                        '<ac:parameter ac:name="type">list</ac:parameter>'
-    contents_markup = contents_markup + '<ac:parameter ac:name="outline">false</ac:parameter>\n' \
-                                        '<ac:parameter ac:name="include"></ac:parameter>\n' \
-                                        '</ac:structured-macro>'
+    contents_markup += '<ac:parameter ac:name="maxLevel">5</ac:parameter>\n' \
+                       '<ac:parameter ac:name="minLevel">1</ac:parameter>'
+    contents_markup += '<ac:parameter ac:name="class">rm-contents</ac:parameter>\n' \
+                       '<ac:parameter ac:name="exclude"></ac:parameter>\n' \
+                       '<ac:parameter ac:name="type">list</ac:parameter>'
+    contents_markup += '<ac:parameter ac:name="outline">false</ac:parameter>\n' \
+                       '<ac:parameter ac:name="include"></ac:parameter>\n' \
+                       '</ac:structured-macro>'
 
     html = contents_markup + '\n' + html
     return html
@@ -451,7 +469,7 @@ def create_or_update_page(title, body, ancestors, filepath):
     if page:
         return update_page(page.id, title, body, page.version, ancestors, filepath)
     else:
-        LOGGER.info('Creating page...')
+        LOGGER.info('Creating page %s...', title)
 
         url = '%s/rest/api/content/' % CONFLUENCE_API_URL
 
@@ -490,13 +508,10 @@ def create_or_update_page(title, body, ancestors, filepath):
             LOGGER.info('Page created in %s with ID: %s.', space_name, page_id)
             LOGGER.info('URL: %s', link)
 
-            img_check = re.search('<img(.*?)\/>', body)
+            img_check = re.search(r'<img(.*?)\/>', body)
             if img_check:
                 LOGGER.info('\tAttachments found, update procedure called.')
                 update_page(page_id, title, body, version, ancestors, filepath)
-            else:
-                if GO_TO_PAGE:
-                    webbrowser.open(link)
             return page_id
         else:
             LOGGER.error('Could not create page.')
@@ -510,7 +525,7 @@ def delete_page(page_id):
     :param page_id: confluence page id
     :return: None
     """
-    LOGGER.info('Deleting page...')
+    LOGGER.info('Deleting page %s...', page_id)
     url = '%s/rest/api/content/%s' % (CONFLUENCE_API_URL, page_id)
 
     session = requests.Session()
@@ -539,6 +554,7 @@ def update_page(page_id, title, body, version, ancestors, filepath):
     :return: updated page id
     """
     LOGGER.info('Updating page...')
+    CACHED_PAGE_INFO.pop(title, None)
 
     # Add images and attachments
     body = add_images(page_id, body, filepath)
@@ -576,12 +592,29 @@ def update_page(page_id, title, body, version, ancestors, filepath):
 
         LOGGER.info("Page updated successfully.")
         LOGGER.info('URL: %s', link)
-        if GO_TO_PAGE:
-            webbrowser.open(link)
         return data[u'id']
     else:
         LOGGER.error("Page could not be updated.")
 
+
+def update_page_refs_only(filepath):
+    """
+    Update refs on a page without changing anything else about it
+
+    :param filepath: markdown file full path
+    """
+    title = get_title(filepath)
+    LOGGER.info('Updating page refs %s...', title)
+
+    # update the page
+    page = get_page(title)
+    html = get_html(filepath)
+    version = page.version
+    ancestors = get_page_as_ancestor(page.ancestor)
+
+    LOGGER.info('.. title: %s .. version: %d .. ancestor: %s ..', title, version, page.ancestor)
+
+    update_page(page.id, title, html, version, ancestors, filepath)
 
 def get_attachment(page_id, filename):
     """
@@ -591,7 +624,8 @@ def get_attachment(page_id, filename):
     :param filename: attachment filename
     :return: attachment info in case of success, False otherwise
     """
-    url = '%s/rest/api/content/%s/child/attachment?filename=%s' % (CONFLUENCE_API_URL, page_id, filename)
+    url = '%s/rest/api/content/%s/child/attachment?filename=%s' % \
+          (CONFLUENCE_API_URL, page_id, filename)
 
     session = requests.Session()
     session.auth = (USERNAME, API_KEY)
@@ -635,7 +669,8 @@ def upload_attachment(page_id, file, comment):
 
     attachment = get_attachment(page_id, filename)
     if attachment:
-        url = '%s/rest/api/content/%s/child/attachment/%s/data' % (CONFLUENCE_API_URL, page_id, attachment.id)
+        url = '%s/rest/api/content/%s/child/attachment/%s/data' % \
+              (CONFLUENCE_API_URL, page_id, attachment.id)
     else:
         url = '%s/rest/api/content/%s/child/attachment/' % (CONFLUENCE_API_URL, page_id)
 
@@ -715,6 +750,9 @@ def resolve_refs(html, filepath):
                 page = get_page(title)
                 if page:
                     html = html.replace(ref[0], "href=\"" + page.link + "\"")
+                else:
+                    if not filepath in RESOLVE_REFS_AGAIN:
+                        RESOLVE_REFS_AGAIN.append(filepath)
     return html
 
 
@@ -725,8 +763,9 @@ def add_note(html):
     :param html: the raw html
     :return: html with warning
     """
-    warning = '<p>~!This is a generated file. Any modifications to it will be lost upon next update. Please use the documentation files in the project repository. !~</p>'
-    html = warning + html
+    if NOTE:
+        warning = '<p>~!' + NOTE + '!~</p>'
+        html = warning + html
     return html
 
 
@@ -766,9 +805,24 @@ def get_landing_page_doc_file(directory):
     :param directory: the directory
     :return: full path to corresponding landing page markdown file
     """
+
+    # if the directory contains a README.md, use that
+    file = Path(directory) / 'README.md'
+    if os.path.exists(file):
+        return file
+
+    # look for a file in the root directory, with a name matching the directory
     root = Path(DOCUMENTATION_ROOT)
     md_file = os.path.basename(directory) + '.md'
-    return root / md_file
+    file = root / md_file
+    if os.path.exists(file):
+        return file
+
+    # fall back on creating a file containing only the directory name
+    file = tempfile.NamedTemporaryFile(mode='w', delete=False)
+    file.write('# ' + os.path.basename(directory) + '\n')
+    file.close()
+    return Path(file.name)
 
 
 def get_page_as_ancestor(page_id):
@@ -781,73 +835,91 @@ def get_page_as_ancestor(page_id):
     return [{'type': 'page', 'id': page_id}]
 
 
-def create_dir_landing_page(dir_landing_page_file, directory, ancestors):
+def create_dir_landing_page(dir_landing_page_file, ancestors):
     """
     Create landing page for a directory
 
     :param dir_landing_page_file: the raw markdown file to use for landing page html generation
-    :param directory: the directory
     :param ancestors: the ancestor pages of the new landing page
-    :return: the created landing page as a API-compatible ancestors object
+    :return: the created landing page id
     """
     landing_page_title = get_title(dir_landing_page_file)
-    ancestor_page = get_page(landing_page_title)
-    landing_page_doc_file = get_landing_page_doc_file(directory)
-    html = get_html(landing_page_doc_file)
+    html = get_html(dir_landing_page_file)
     if SIMULATE:
         log_html(html, landing_page_title)
         return []
 
-    page_id = create_or_update_page(landing_page_title, html, ancestors, landing_page_doc_file)
-    page_as_ancestor = get_page_as_ancestor(page_id)
+    page_id = create_or_update_page(landing_page_title, html, ancestors, dir_landing_page_file)
 
-    return page_as_ancestor
+    return page_id
 
 
-def create_dir_landing_page_recursively(directory):
+def does_path_contain(directory, predicate):
     """
-    Create ancestor landing page for directory
+    Determine if a directory contains any file matching a predicate,
+    including within subdirectories
 
-    :param directory: the directory
-    :return: the created landing page as a API-compatible ancestors object
+    :param directory: directory in which to look for matching files
+    :param predicate: predicate function to determine if a file matches
+    :return: True if any file in the directory or subdirectories matches the predicate
     """
-    ancestor_landing_page_dir = os.path.abspath(os.path.join(directory, os.pardir))
-    ancestor_landing_page_file = get_landing_page_doc_file(ancestor_landing_page_dir)
-    ancestor_landing_page_title = get_title(ancestor_landing_page_file)
-    ancestor_page = get_page(ancestor_landing_page_title)
-
-    if ancestor_page:
-        page_as_ancestor = get_or_create_page(ancestor_page, directory)
-    else:
-        ancestor_of_page = create_dir_landing_page_recursively(ancestor_landing_page_dir)
-        page_as_ancestor = get_or_create_page(ancestor_of_page, directory)
-
-    return page_as_ancestor
+    for _root, _dirs, files in os.walk(directory):
+        for file in files:
+            if predicate(file):
+                return True
+    return False
 
 
-def get_or_create_page(ancestor_page, directory):
-    dir_landing_page_file = get_landing_page_doc_file(directory)
-    title = get_title(dir_landing_page_file)
-    page = get_page(title)
-    if page:
-        page_as_ancestor = get_page_as_ancestor(page.id)
-    else:
-        page_as_ancestor = create_dir_landing_page(dir_landing_page_file, directory, get_page_as_ancestor(ancestor_page.id))
-    return page_as_ancestor
-
-
-def get_subdirectories_recursively(directory):
+def upload_folder(directory, ancestors):
     """
-    Get subdirectories under the directory
+    Upload everything under a folder, recursively
 
-    :param directory: the directory
-    :return: list of subdirectories
+    :param directory: folder to upload
+    :param ancestors: parent page in ancestors format
+    :return: list of page ids that are active in this folder
     """
-    subdirectories = [f.path for f in os.scandir(directory) if f.is_dir()]
-    for directory in list(subdirectories):
-        subdirectories.extend(get_subdirectories_recursively(directory))
+    LOGGER.info('\t\tFolder:\t%s', directory)
+    active_pages = []
 
-    return subdirectories
+    # there must be at least one .md file under this folder or a
+    # subfolder in order for us to proceed with processing it
+    if not does_path_contain(directory, lambda file : os.path.splitext(file)[1] == '.md'):
+        LOGGER.info('\t\tSkipping folder; no files found')
+        return active_pages
+
+    # Walk through all .md files in this directory and upload them all with
+    # the same ancestors (i.e. as siblings)
+    dir_landing_as_ancestors = None
+    for file in os.scandir(directory):
+        if file.is_file() and os.path.splitext(file)[1] == '.md':
+            LOGGER.info('Markdown file:\t%s', file.name)
+            title = get_title(file.path)
+            html = get_html(file.path)
+
+            if SIMULATE:
+                log_html(html, title)
+            else:
+                page_id = create_or_update_page(title, html, ancestors, file.path)
+                active_pages.append(page_id)
+                if dir_landing_as_ancestors is None or \
+                    os.path.basename(file).lower() == 'readme.md':
+                    dir_landing_as_ancestors = get_page_as_ancestor(page_id)
+
+    # If we didn't get any landing page at all, then we must create one
+    if dir_landing_as_ancestors is None and not SIMULATE:
+        doc_file = get_landing_page_doc_file(directory)
+        dir_landing_page_id = create_dir_landing_page(doc_file, ancestors)
+        active_pages.append(dir_landing_page_id)
+        dir_landing_as_ancestors = get_page_as_ancestor(dir_landing_page_id)
+
+    # Walk through all subdirectories and recursively upload them,
+    # using this directory's landing page as the ancestor for them
+    for folder in os.scandir(directory):
+        if folder.is_dir():
+            child_active_pages = upload_folder(folder.path, dir_landing_as_ancestors)
+            active_pages.extend(child_active_pages)
+
+    return active_pages
 
 
 def main():
@@ -862,62 +934,45 @@ def main():
 
     LOGGER.info('Space Key:\t%s', SPACE_KEY)
 
-    doc_file = get_landing_page_doc_file(DOCUMENTATION_ROOT)
-    doc_landing_page_title = get_title(doc_file)
-    original_child_pages = []
+    # get the pages that are currently under the ancestor
+    original_child_pages = {}
+    direct_child_pages = get_direct_child_pages(ANCESTOR)
+    for child in direct_child_pages:
+        original_child_pages[child] = get_child_pages(child)
+
+    LOGGER.info("child pages done")
+
+    # upload everything under the ancestor
+    root_ancestors = get_page_as_ancestor(ANCESTOR)
+    active_pages = upload_folder(DOCUMENTATION_ROOT, root_ancestors)
+
+    # for any pages with refs that could not be resolved,
+    # revisit them and try again
+    if len(RESOLVE_REFS_AGAIN) > 0:
+        LOGGER.info('-- Attempting to resolve cross-references --')
+        for page in RESOLVE_REFS_AGAIN:
+            update_page_refs_only(page)
+
+    # remove any pages that are no longer needed; any top-level
+    # page under the ancestor, and its children, are spared; but
+    # any children under any page that we have touched are fair
+    # game to be removed
+    for original_child_page in original_child_pages:
+        if original_child_page not in active_pages:
+            LOGGER.info("Sparing original page: %s", original_child_page)
+        else:
+            for child in original_child_pages[original_child_page]:
+                if child not in active_pages:
+                    if SIMULATE:
+                        LOGGER.info('Original page with page id %s has no markdown file to '
+                                    'update from, so it will be deleted.', child)
+                    else:
+                        delete_page(child)
+
     if SIMULATE:
-        html = get_html(doc_file)
-        log_html(html, doc_landing_page_title)
+        LOGGER.info("Simulate mode completed successfully.")
     else:
-        doc_landing_page = get_page(doc_landing_page_title)
-        if doc_landing_page:
-            original_child_pages = get_child_pages(doc_landing_page.id)
-            original_child_pages.append(doc_landing_page.id)
-        LOGGER.info('Original documentation pages before the tool has run:\t%s', original_child_pages)
-
-        if DELETE:
-            [delete_page(page_id) for page_id in original_child_pages]
-            LOGGER.info('The pages deleted successfully.')
-            sys.exit(1)
-
-        create_dir_landing_page(doc_file, DOCUMENTATION_ROOT, get_page_as_ancestor(ANCESTOR))
-
-    directories = get_subdirectories_recursively(DOCUMENTATION_ROOT)
-    active_pages = []
-    for directory in directories:
-        dir_landing_page_file = get_landing_page_doc_file(directory)
-        if SIMULATE:
-            dir_landing_page_title = get_title(dir_landing_page_file)
-            html = get_html(dir_landing_page_file)
-            log_html(html, dir_landing_page_title)
-        else:
-            dir_landing_as_ancestor = create_dir_landing_page_recursively(directory)
-            active_pages.append(dir_landing_as_ancestor[0][u'id'])
-
-        for file in os.scandir(directory):
-            if file.path.endswith('.md'):
-                LOGGER.info('Markdown file:\t%s', file.name)
-                title = get_title(file.path)
-                html = get_html(file.path)
-
-                if SIMULATE:
-                    log_html(html, title)
-                else:
-                    page_id = create_or_update_page(title, html, dir_landing_as_ancestor, file.path)
-                    active_pages.append(page_id)
-                    continue
-
-        for original_child_page in original_child_pages:
-            if original_child_page not in active_pages:
-                if SIMULATE:
-                    LOGGER.info("Original page with page id %s has no markdown file to update from, so it will be deleted.", original_child_page)
-                else:
-                    delete_page(original_child_page)
-
-        if SIMULATE:
-            LOGGER.info("Simulate mode completed successfully.")
-        else:
-            LOGGER.info('Markdown Converter completed successfully.')
+        LOGGER.info('Markdown Converter completed successfully.')
 
 
 if __name__ == "__main__":
