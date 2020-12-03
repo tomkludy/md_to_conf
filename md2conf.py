@@ -26,7 +26,7 @@ import markdown
 from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - \
-%(levelname)s - %(funcName)s [%(lineno)d] - \
+%(levelname)-5s - [%(lineno)-3d] %(funcName)-18s - \
 %(message)s')
 LOGGER = logging.getLogger(__name__)
 
@@ -312,7 +312,7 @@ def get_page(title):
     if title in CACHED_PAGE_INFO:
         return CACHED_PAGE_INFO[title]
 
-    LOGGER.info('\tRetrieving page information: %s', title)
+    LOGGER.info('Retrieving page information: %s', title)
     url = '%s/rest/api/content?title=%s&spaceKey=%s&expand=version,ancestors' % (
         CONFLUENCE_API_URL, urllib.parse.quote_plus(title), SPACE_KEY)
 
@@ -349,7 +349,7 @@ def get_child_pages(page_id):
     if page_id in CHILD_PAGES_CACHE:
         return CHILD_PAGES_CACHE[page_id]
 
-    LOGGER.info('\tRetrieving information of original child pages: %s', page_id)
+    LOGGER.info('Retrieving information of original child pages: %s', page_id)
     page_ids = get_direct_child_pages(page_id)
 
     for page_id in page_ids:
@@ -400,8 +400,8 @@ def check_for_errors(response):
         LOGGER.error('err.response: %s', err)
         if response.status_code == 404:
             LOGGER.error('Error: Page not found. Check the following are correct:')
-            LOGGER.error('\tSpace Key : %s', SPACE_KEY)
-            LOGGER.error('\tOrganisation Name: %s', ORGNAME)
+            LOGGER.error('Space Key : %s', SPACE_KEY)
+            LOGGER.error('Organisation Name: %s', ORGNAME)
         else:
             LOGGER.error('Error: %d - %s', response.status_code, response.content)
         sys.exit(1)
@@ -543,7 +543,7 @@ def create_or_update_page(title, body, ancestors, filepath):
 
             img_check = re.search(r'<img(.*?)\/>', body)
             if img_check:
-                LOGGER.info('\tAttachments found, update procedure called.')
+                LOGGER.info('Attachments found, update procedure called.')
                 return update_page(page_id, title, body, version, ancestors, filepath)
             else:
                 return page_id, []
@@ -713,7 +713,7 @@ def upload_attachment(page_id, file, comment):
     session.auth = (USERNAME, API_KEY)
     session.headers.update({'X-Atlassian-Token': 'no-check'})
 
-    LOGGER.info('\tUploading attachment %s...', filename)
+    LOGGER.info('Uploading attachment %s...', filename)
 
     response = session.post(url, files=file_to_upload)
     response.raise_for_status()
@@ -763,7 +763,7 @@ def get_html(filepath):
         html_log_file.write('<h1>' + title + '</h1>')
         html_log_file.write(html)
     else:
-        LOGGER.debug('\tfile: %s \n\thtml: %s', filepath, html)
+        LOGGER.debug('file: %s\nhtml: %s', filepath, html)
 
     return html
 
@@ -843,7 +843,7 @@ def get_title(filepath):
     TITLE_CACHE_BY_FILE[filepath] = title
     TITLES_USED.append(title)
 
-    LOGGER.info('Title:\t\t%s', title)
+    LOGGER.info('Title: %s', title)
     return title
 
 
@@ -925,41 +925,38 @@ def upload_folder(directory, ancestors):
     :param ancestors: parent page in ancestors format
     :return: list of page ids that are active in this folder
     """
-    LOGGER.info('\t\tFolder:\t%s', directory)
+    LOGGER.info('Folder: %s', directory)
     active_pages = []
 
     # there must be at least one .md file under this folder or a
     # subfolder in order for us to proceed with processing it
     if not does_path_contain(directory, lambda file : os.path.splitext(file)[1] == '.md'):
-        LOGGER.info('\t\tSkipping folder; no files found')
+        LOGGER.info('Skipping folder; no files found')
         return active_pages
 
-    # Walk through all .md files in this directory and upload them all with
-    # the same ancestors (i.e. as siblings)
-    dir_landing_as_ancestors = None
+    # Make sure there is a landing page for the directory
+    doc_file = get_landing_page_doc_file(directory)
+    dir_landing_page_id, image_pages = create_dir_landing_page(doc_file, ancestors)
+    active_pages.append(dir_landing_page_id)
+    active_pages.extend(image_pages)
+    dir_landing_as_ancestors = get_page_as_ancestor(dir_landing_page_id)
+
+    # Walk through all other .md files in this directory and upload them all with
+    # the landing page as its ancestor
     for file in os.scandir(directory):
         if file.is_file() and os.path.splitext(file)[1] == '.md':
-            LOGGER.info('Markdown file:\t%s', file.name)
-            title = get_title(file.path)
-            html = get_html(file.path)
+            if os.path.normpath(file.path) != os.path.normpath(doc_file):
+                LOGGER.info('Markdown file: %s', file.name)
+                title = get_title(file.path)
+                html = get_html(file.path)
 
-            if SIMULATE:
-                log_html(html, title)
-            else:
-                page_id, image_pages = create_or_update_page(title, html, ancestors, file.path)
-                active_pages.append(page_id)
-                active_pages.extend(image_pages)
-                if dir_landing_as_ancestors is None or \
-                    os.path.basename(file).lower() == 'readme.md':
-                    dir_landing_as_ancestors = get_page_as_ancestor(page_id)
-
-    # If we didn't get any landing page at all, then we must create one
-    if dir_landing_as_ancestors is None and not SIMULATE:
-        doc_file = get_landing_page_doc_file(directory)
-        dir_landing_page_id, image_pages = create_dir_landing_page(doc_file, ancestors)
-        active_pages.append(dir_landing_page_id)
-        active_pages.extend(image_pages)
-        dir_landing_as_ancestors = get_page_as_ancestor(dir_landing_page_id)
+                if SIMULATE:
+                    log_html(html, title)
+                else:
+                    page_id, image_pages = create_or_update_page(title, html,
+                                            dir_landing_as_ancestors, file.path)
+                    active_pages.append(page_id)
+                    active_pages.extend(image_pages)
 
     # Walk through all subdirectories and recursively upload them,
     # using this directory's landing page as the ancestor for them
@@ -977,11 +974,11 @@ def main():
 
     :return:
     """
-    LOGGER.info('\t\t----------------------------------')
-    LOGGER.info('\t\tMarkdown to Confluence Upload Tool')
-    LOGGER.info('\t\t----------------------------------\n\n')
+    LOGGER.info('----------------------------------')
+    LOGGER.info('Markdown to Confluence Upload Tool')
+    LOGGER.info('----------------------------------\n\n')
 
-    LOGGER.info('Space Key:\t%s', SPACE_KEY)
+    LOGGER.info('Space Key: %s', SPACE_KEY)
 
     # get the pages that are currently under the ancestor
     original_child_pages = {}
