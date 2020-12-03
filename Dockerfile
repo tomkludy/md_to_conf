@@ -1,8 +1,8 @@
 FROM python:3-alpine
 
-ADD requirements.txt /tmp/requirements.txt
+COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install -r /tmp/requirements.txt
-ADD md2conf.py /usr/local/bin/md2conf
+COPY *.py /usr/local/bin/
 
 WORKDIR /publish
-ENTRYPOINT ["/usr/local/bin/md2conf"]
+ENTRYPOINT ["/usr/local/bin/md2conf.py"]
