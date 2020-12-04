@@ -11,7 +11,6 @@ from pathlib import Path
 import markdown
 
 from globals import LOGGER
-from globals import DOCUMENTATION_ROOTS
 from globals import LOG_FILE
 from globals import LOG_HTML
 from globals import CONTENTS
