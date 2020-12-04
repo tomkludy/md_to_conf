@@ -9,7 +9,7 @@
 import os
 
 from globals import LOGGER
-from globals import DOCUMENTATION_ROOT
+from globals import DOCUMENTATION_ROOTS
 from globals import SPACE_KEY
 from globals import ANCESTOR
 from globals import SIMULATE
@@ -81,7 +81,9 @@ def main():
 
     # upload everything under the ancestor
     root_ancestors = common.get_page_as_ancestor(ANCESTOR)
-    upload_folder(DOCUMENTATION_ROOT, root_ancestors)
+
+    for root in DOCUMENTATION_ROOTS:
+        upload_folder(root, root_ancestors)
 
     # for any pages with refs that could not be resolved,
     # revisit them and try again

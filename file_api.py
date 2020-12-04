@@ -11,7 +11,7 @@ from pathlib import Path
 import markdown
 
 from globals import LOGGER
-from globals import DOCUMENTATION_ROOT
+from globals import DOCUMENTATION_ROOTS
 from globals import LOG_FILE
 from globals import LOG_HTML
 from globals import CONTENTS
@@ -95,13 +95,6 @@ class _FileApi:
 
         # if the directory contains a README.md, use that
         file = Path(directory) / 'README.md'
-        if os.path.exists(file):
-            return file
-
-        # look for a file in the root directory, with a name matching the directory
-        root = Path(DOCUMENTATION_ROOT)
-        md_file = os.path.basename(directory) + '.md'
-        file = root / md_file
         if os.path.exists(file):
             return file
 

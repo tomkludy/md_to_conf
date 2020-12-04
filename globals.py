@@ -36,8 +36,8 @@ def _get_args():
     parser.add_argument('-a', '--ancestor',
                         help='The id of the parent page under which every other page will be '
                              'created or updated. You can find the id in the URL.')
-    parser.add_argument('-f', '--folder',
-                        help='Full path of the documentation folder to convert and upload.  '
+    parser.add_argument('-f', '--folders', nargs='*',
+                        help='Full path of the documentation folder(s) to convert and upload.  '
                              'Defaults to current working directory.')
     parser.add_argument('-c', '--contents', action='store_true', default=False,
                         help='Use this option to generate a contents page.')
@@ -58,13 +58,13 @@ def _get_args():
 
     return args
 
-def _get_documentation_root(args):
+def _get_documentation_roots(args):
     """
-    Get documentation root
+    Get documentation root(s)
     :param args: args
-    :return: documentation root
+    :return: documentation root(s)
     """
-    return args.folder or os.getcwd()
+    return args.folders or [os.getcwd()]
 
 def _get_log_file(_args):
     """
@@ -153,7 +153,7 @@ def _get_note(args):
 
 
 _args = _get_args()
-DOCUMENTATION_ROOT = _get_documentation_root(_args)
+DOCUMENTATION_ROOTS = _get_documentation_roots(_args)
 LOG_FILE = _get_log_file(_args)
 USERNAME = _get_user_name(_args)
 API_KEY = _get_api_key(_args)
