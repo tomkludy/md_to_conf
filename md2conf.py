@@ -34,6 +34,7 @@ def upload_folder(directory, ancestors):
     # subfolder in order for us to proceed with processing it
     if not common.does_path_contain(directory, lambda file : os.path.splitext(file)[1] == '.md'):
         LOGGER.info('Skipping folder; no files found')
+        return
 
     # Make sure there is a landing page for the directory
     doc_file = FILE_API.get_landing_page_doc_file(directory)

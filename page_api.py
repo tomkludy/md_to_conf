@@ -75,6 +75,7 @@ class _PageApi:
                 else:
                     file = tempfile.NamedTemporaryFile(mode='w', delete=False)
                     title = urllib.parse.unquote(os.path.basename(image))
+                    title = "%s - Diagram" % (os.path.splitext(title)[0])
                     file.write('# %s\n' % title)
                     temp_dirname = os.path.abspath(os.path.dirname(file.name))
                     rel_image_from_temp = os.path.relpath(image, temp_dirname)
