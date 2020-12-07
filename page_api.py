@@ -151,7 +151,7 @@ class _PageApi:
                     LOGGER.info('Attachments found, update procedure called.')
                     return self.update_page(page_id, title, body, version, ancestors, filepath)
                 else:
-                    return page_id, []
+                    return page_id
             else:
                 LOGGER.error('Could not create page.')
                 sys.exit(1)
