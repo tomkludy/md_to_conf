@@ -74,7 +74,8 @@ class _FileApi:
 
         basetitle = title
         i = 0
-        while title in self.__TITLE_CACHE_BY_FILE.values():
+        while (title in self.__TITLE_CACHE_BY_FILE.values()) or \
+              (PAGE_CACHE.is_page_unowned(title)):
             i += 1
             title = '%s (%d)' % (basetitle, i)
 

@@ -90,7 +90,9 @@ def main():
     # revisit them and try again
     RESOLVERS.resolve_missing_refs()
 
-    CHILD_PAGES.trim_child_pages()
+    if CHILD_PAGES.trash_needed():
+        trash = PAGE_API.create_trash()
+        CHILD_PAGES.trim_child_pages(trash)
 
     if SIMULATE:
         LOGGER.info("Simulate mode completed successfully.")

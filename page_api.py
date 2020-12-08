@@ -26,6 +26,7 @@ from globals import API_KEY
 from globals import SPACE_KEY
 from globals import CONFLUENCE_API_URL
 from globals import SIMULATE
+from globals import ANCESTOR
 
 
 class _PageApi:
@@ -125,7 +126,7 @@ class _PageApi:
                             }
                         },
                         'ancestors': ancestors
-                        }
+                       }
 
             LOGGER.debug("data: %s", json.dumps(new_page))
 
@@ -145,6 +146,9 @@ class _PageApi:
 
                 LOGGER.info('Page created in %s with ID: %s.', space_name, page_id)
                 LOGGER.info('URL: %s', link)
+
+                # label the page
+                self.__label_page(page_id)
 
                 img_check = re.search(r'<img(.*?)\/>', body)
                 if img_check:
@@ -211,6 +215,24 @@ class _PageApi:
             return data[u'id']
         else:
             LOGGER.error("Page could not be updated.")
+
+
+    def __label_page(self, page_id):
+        """
+        Attach a label to the page to indicate it was auto-generated
+        """
+        LOGGER.info("Labeling page %s", page_id)
+        session = requests.Session()
+        session.auth = (USERNAME, API_KEY)
+        session.headers.update({'Content-Type': 'application/json'})
+
+        url = '%s/rest/api/content/%s/label' % (CONFLUENCE_API_URL, page_id)
+
+        page_json = [{ "name": "md_to_conf" }]
+
+        response = session.post(url, data=json.dumps(page_json))
+        response.raise_for_status()
+
 
 
     def __get_attachment(self, page_id, filename):
@@ -299,6 +321,25 @@ class _PageApi:
 
         return self.create_or_update_page(landing_page_title, html, \
                                           ancestors, dir_landing_page_file)
+
+
+    def create_trash(self):
+        """
+        Create a __ORPHAN__ folder under the root ancestor
+        """
+        file = tempfile.NamedTemporaryFile(mode='w', delete=False)
+        file.write('''# __ORPHAN__
+
+<p>~!Files under this folder are NOT present in the source repo and and were moved here in lieu of deletion.!~</p>
+
+If these files are no longer needed, it is safe to delete this folder.
+''')
+        file.close()
+        title = FILE_API.get_title(file.name)
+        html = FILE_API.get_html(file.name)
+        root_ancestors = common.get_page_as_ancestor(ANCESTOR)
+        page_id = self.create_or_update_page(title, html, root_ancestors, file.name)
+        return page_id
 
 
 PAGE_API = _PageApi()

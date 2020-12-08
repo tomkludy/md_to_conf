@@ -62,8 +62,8 @@ class _PageCache:
             return self.__CACHED_PAGE_INFO[title]
 
         LOGGER.info('Retrieving page information: %s', title)
-        url = '%s/rest/api/content?title=%s&spaceKey=%s&expand=version,ancestors' % (
-            CONFLUENCE_API_URL, urllib.parse.quote_plus(title), SPACE_KEY)
+        url = '%s/rest/api/content?title=%s&spaceKey=%s&expand=version,ancestors,metadata.labels' \
+            % (CONFLUENCE_API_URL, urllib.parse.quote_plus(title), SPACE_KEY)
 
         session = requests.Session()
         session.auth = (USERNAME, API_KEY)
@@ -78,13 +78,23 @@ class _PageCache:
             version_num = data[u'results'][0][u'version'][u'number']
             link = '%s%s' % (CONFLUENCE_API_URL, data[u'results'][0][u'_links'][u'webui'])
             ancestor = data[u'results'][0][u'ancestors'][-1][u'id']
+            labels = map(lambda r: r[u'name'],
+                         data[u'results'][0][u'metadata'][u'labels'][u'results'])
 
-            page_info = collections.namedtuple('PageInfo', ['id', 'version', 'link', 'ancestor'])
-            page = page_info(page_id, version_num, link, ancestor)
+            page_info = collections.namedtuple('PageInfo',
+                            ['id', 'version', 'link', 'ancestor', 'labels'])
+            page = page_info(page_id, version_num, link, ancestor, labels)
             self.__CACHED_PAGE_INFO[title] = page
             return page
 
         return False
+
+
+    def is_page_unowned(self, title):
+        page = self.get_page(title)
+        if not page:
+            return False
+        return not 'md_to_conf' in page.labels
 
 
     def forget_page(self, title):

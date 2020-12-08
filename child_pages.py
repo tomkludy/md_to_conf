@@ -6,6 +6,7 @@
 
 import urllib
 import urllib.parse
+import json
 import requests
 
 import common
@@ -47,7 +48,20 @@ class _ChildPageTracker:
             self.__ACTIVE_PAGES.append(page)
 
 
-    def trim_child_pages(self):
+    def trash_needed(self):
+        """
+        Return True if a "trash can" folder is needed
+        """
+        for original_child_page in self.__ORIGINAL_CHILD_PAGES:
+            if original_child_page in self.__ACTIVE_PAGES:
+                for child in self.__ORIGINAL_CHILD_PAGES[original_child_page]:
+                    if child not in self.__ACTIVE_PAGES:
+                        return True
+        return False
+
+
+
+    def trim_child_pages(self, trash_ancestor):
         """
         Trim (delete) any child pages under the "active"
         children of the ANCESTOR which are not "active"
@@ -66,7 +80,7 @@ class _ChildPageTracker:
                             LOGGER.info('Original page with page id %s has no markdown file to '
                                         'update from, so it will be deleted.', child)
                         else:
-                            self.__delete_page(child)
+                            self.__delete_page(child, trash_ancestor)
 
 
     def __get_child_pages(self, page_id):
@@ -116,27 +130,49 @@ class _ChildPageTracker:
 
         return page_ids
 
-    def __delete_page(self, page_id):
+    def __delete_page(self, page_id, trash_ancestor):
         """
-        Delete a page
+        Delete a page by moving it to the trash folder
 
         :param page_id: confluence page id
         :return: None
         """
-        LOGGER.info('Deleting page %s...', page_id)
+        LOGGER.info('Moving page %s to TRASH...', page_id)
+        url = '%s/rest/api/content/%s?expand=version' % (
+            CONFLUENCE_API_URL, page_id)
+
+        session = requests.Session()
+        session.auth = (USERNAME, API_KEY)
+
+        response = session.get(url)
+        common.check_for_errors(response)
+        data = response.json()
+        LOGGER.debug("data: %s", str(data))
+
+        page_id = data[u'id']
+        version = data[u'version'][u'number']
+        title = data[u'title']
+        ancestors = common.get_page_as_ancestor(trash_ancestor)
+
         url = '%s/rest/api/content/%s' % (CONFLUENCE_API_URL, page_id)
 
         session = requests.Session()
         session.auth = (USERNAME, API_KEY)
         session.headers.update({'Content-Type': 'application/json'})
 
-        response = session.delete(url)
+        page_json = {
+            "id": page_id,
+            "type": "page",
+            "title": title,
+            "version": {
+                "number": version + 1,
+                "minorEdit": True
+            },
+            'ancestors': ancestors
+        }
+        LOGGER.debug("data: %s", json.dumps(page_json))
+        response = session.put(url, data=json.dumps(page_json))
         response.raise_for_status()
-
-        if response.status_code == 204:
-            LOGGER.info('Page %s deleted successfully.', page_id)
-        else:
-            LOGGER.error('Page %s could not be deleted.', page_id)
 
 
 CHILD_PAGES = _ChildPageTracker()
