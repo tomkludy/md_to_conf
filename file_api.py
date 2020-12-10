@@ -8,6 +8,7 @@ import os
 import tempfile
 import codecs
 from pathlib import Path
+import hashlib
 import markdown
 
 from globals import LOGGER
@@ -24,6 +25,7 @@ class _FileApi:
     """
 
     __TITLE_CACHE_BY_FILE = {}
+    __SHA_HASH_BY_FILE = {}
 
     def get_html(self, filepath):
         """
@@ -43,6 +45,7 @@ class _FileApi:
         html = macros.convert_info_macros(html)
         html = macros.convert_comment_block(html)
         html = macros.convert_code_block(html)
+        html = macros.remove_empty_list_items(html)
         if CONTENTS:
             html = macros.add_contents(html)
 
@@ -103,6 +106,28 @@ class _FileApi:
         file.write('# ' + os.path.basename(directory) + '\n')
         file.close()
         return Path(file.name)
+
+
+    def get_sha_hash(self, file):
+        """
+        Get the SHA hash of a file's contents
+
+        :param file: file to hash the contents of
+        """
+        if file in self.__SHA_HASH_BY_FILE:
+            return self.__SHA_HASH_BY_FILE[file]
+
+        sha256 = hashlib.sha256()
+        with open(file, 'rb') as handle:
+            while True:
+                data = handle.read(65536)
+                if not data:
+                    break
+                sha256.update(data)
+
+        digest = sha256.hexdigest()
+        self.__SHA_HASH_BY_FILE[file] = digest
+        return digest
 
 
 FILE_API = _FileApi()

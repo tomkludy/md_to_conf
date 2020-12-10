@@ -13,6 +13,7 @@ from globals import DOCUMENTATION_ROOTS
 from globals import SPACE_KEY
 from globals import ANCESTOR
 from globals import SIMULATE
+from globals import NOTRACK
 
 import common
 from file_api import FILE_API
@@ -78,7 +79,8 @@ def main():
 
     LOGGER.info('Space Key: %s', SPACE_KEY)
 
-    CHILD_PAGES.track_child_pages()
+    if not NOTRACK:
+        CHILD_PAGES.track_child_pages()
 
     # upload everything under the ancestor
     root_ancestors = common.get_page_as_ancestor(ANCESTOR)
@@ -90,7 +92,7 @@ def main():
     # revisit them and try again
     RESOLVERS.resolve_missing_refs()
 
-    if CHILD_PAGES.trash_needed():
+    if not NOTRACK and CHILD_PAGES.trash_needed():
         trash = PAGE_API.create_trash()
         CHILD_PAGES.trim_child_pages(trash)
 

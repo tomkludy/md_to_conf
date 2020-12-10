@@ -10,11 +10,8 @@ import re
 import collections
 import urllib
 import urllib.parse
-import requests
 
 from globals import LOGGER
-from globals import USERNAME
-from globals import API_KEY
 from globals import SPACE_KEY
 from globals import CONFLUENCE_API_URL
 import common
@@ -62,28 +59,35 @@ class _PageCache:
             return self.__CACHED_PAGE_INFO[title]
 
         LOGGER.info('Retrieving page information: %s', title)
-        url = '%s/rest/api/content?title=%s&spaceKey=%s&expand=version,ancestors,metadata.labels' \
-            % (CONFLUENCE_API_URL, urllib.parse.quote_plus(title), SPACE_KEY)
+        url = '%s/rest/api/content?title=%s&spaceKey=%s' \
+              '&expand=version,ancestors,metadata.labels,body.storage' \
+              % (CONFLUENCE_API_URL, urllib.parse.quote_plus(title), SPACE_KEY)
 
-        session = requests.Session()
-        session.auth = (USERNAME, API_KEY)
-
-        response = session.get(url)
-        common.check_for_errors(response)
+        response = common.make_request_get(url)
         data = response.json()
         LOGGER.debug("data: %s", str(data))
 
         if len(data[u'results']) >= 1:
-            page_id = data[u'results'][0][u'id']
-            version_num = data[u'results'][0][u'version'][u'number']
-            link = '%s%s' % (CONFLUENCE_API_URL, data[u'results'][0][u'_links'][u'webui'])
-            ancestor = data[u'results'][0][u'ancestors'][-1][u'id']
+            data = data[u'results'][0]
+            page_id = data[u'id']
+            version_num = data[u'version'][u'number']
+            link = '%s%s' % (CONFLUENCE_API_URL, data[u'_links'][u'webui'])
+            ancestor = data[u'ancestors'][-1][u'id']
             labels = map(lambda r: r[u'name'],
-                         data[u'results'][0][u'metadata'][u'labels'][u'results'])
+                         data[u'metadata'][u'labels'][u'results'])
+            body = data[u'body'][u'storage'][u'value']
+
+            # These properties do not round-trip; confluence adds them, so strip them out
+            body = re.sub(' ac:schema-version="[^"]+"', '', body)
+            body = re.sub(' ac:macro-id="[^"]+"', '', body)
+            # Confluence replaces some quotes (but not all) with xml quotes
+            body = re.sub('&quot;', '"', body)
+
+            title = data[u'title']
 
             page_info = collections.namedtuple('PageInfo',
-                            ['id', 'version', 'link', 'ancestor', 'labels'])
-            page = page_info(page_id, version_num, link, ancestor, labels)
+                            ['id', 'version', 'link', 'ancestor', 'labels', 'body', 'title'])
+            page = page_info(page_id, version_num, link, ancestor, labels, body, title)
             self.__CACHED_PAGE_INFO[title] = page
             return page
 

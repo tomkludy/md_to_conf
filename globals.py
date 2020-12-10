@@ -50,6 +50,8 @@ def _get_args():
     parser.add_argument('--note',
                         help='Use this option to specify a note to prepend on generated html '
                              'pages.')
+    parser.add_argument('--notrack', action='store_true', default=False,
+                        help='Use this option to avoid tracking / deleting children.')
 
     args = parser.parse_args()
 
@@ -164,3 +166,4 @@ NOTE = _get_note(_args)
 SIMULATE = _args.simulate
 LOG_HTML = _args.loghtml
 CONTENTS = _args.contents
+NOTRACK = _args.notrack

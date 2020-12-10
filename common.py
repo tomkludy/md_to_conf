@@ -7,12 +7,15 @@
 import sys
 import os
 
+import time
 import requests
 
 from globals import LOGGER
 from globals import LOG_FILE
 from globals import SPACE_KEY
 from globals import CONFLUENCE_API_URL
+from globals import USERNAME
+from globals import API_KEY
 
 def check_for_errors(response):
     """
@@ -32,6 +35,72 @@ def check_for_errors(response):
         else:
             LOGGER.error('Error: %d - %s', response.status_code, response.content)
         sys.exit(1)
+
+
+def _make_request(callback, check_response = True):
+    """
+    Make a request
+    """
+    session = requests.Session()
+    session.auth = (USERNAME, API_KEY)
+    session.headers.update({'Content-Type': 'application/json'})
+    response = callback(session)
+
+    # This happens intermittently; if it does, wait a second and try again
+    retries = 2
+    while retries and response.status_code == 401:
+        retries = retries - 1
+        time.sleep(1)
+        response = callback(session)
+
+    if check_response:
+        response.raise_for_status()
+
+    return response
+
+
+def make_request_get(url, check_response = True):
+    """
+    Make a simple standard GET request
+    """
+    return _make_request(lambda session: session.get(url), check_response)
+
+
+def make_request_put(url, data, check_response = True):
+    """
+    Make a simple standard PUT request
+    """
+    return _make_request(lambda session: session.put(url, data=data), check_response)
+
+
+def make_request_post(url, data, check_response = True):
+    """
+    Make a simple standard POST request
+    """
+    return _make_request(lambda session: session.post(url, data=data), check_response)
+
+
+def make_request_upload(url, file_to_upload):
+    """
+    Upload a file to a url
+    """
+    # this is different enough from the normal make_request
+    # that factoring out the commonalities makes it hard
+    # to follow the logic; I preferred to just duplicate
+    session = requests.Session()
+    session.auth = (USERNAME, API_KEY)
+    session.headers.update({'X-Atlassian-Token': 'no-check'})
+    response = session.post(url, files=file_to_upload)
+
+    # This happens intermittently; if it does, wait a second and try again
+    retries = 2
+    while retries and response.status_code == 401:
+        retries = retries - 1
+        time.sleep(1)
+        response = session.post(url, files=file_to_upload)
+
+    response.raise_for_status()
+    return response
 
 
 def log_html(html, title):

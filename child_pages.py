@@ -7,13 +7,10 @@
 import urllib
 import urllib.parse
 import json
-import requests
 
 import common
 
 from globals import LOGGER
-from globals import USERNAME
-from globals import API_KEY
 from globals import CONFLUENCE_API_URL
 from globals import ANCESTOR
 from globals import SIMULATE
@@ -115,12 +112,7 @@ class _ChildPageTracker:
         url = '%s/rest/api/content/search?cql=parent=%s' % \
             (CONFLUENCE_API_URL, urllib.parse.quote_plus(page_id))
 
-        session = requests.Session()
-        session.auth = (USERNAME, API_KEY)
-
-        response = session.get(url)
-        common.check_for_errors(response)
-
+        response = common.make_request_get(url)
         data = response.json()
         LOGGER.debug("data: %s", str(data))
 
@@ -130,22 +122,19 @@ class _ChildPageTracker:
 
         return page_ids
 
+
     def __delete_page(self, page_id, trash_ancestor):
         """
-        Delete a page by moving it to the trash folder
+        Delete a page by moving it to the orphan folder
 
         :param page_id: confluence page id
         :return: None
         """
-        LOGGER.info('Moving page %s to TRASH...', page_id)
+        LOGGER.info('Moving page %s to ORPHAN...', page_id)
         url = '%s/rest/api/content/%s?expand=version' % (
             CONFLUENCE_API_URL, page_id)
 
-        session = requests.Session()
-        session.auth = (USERNAME, API_KEY)
-
-        response = session.get(url)
-        common.check_for_errors(response)
+        response = common.make_request_get(url)
         data = response.json()
         LOGGER.debug("data: %s", str(data))
 
@@ -155,11 +144,6 @@ class _ChildPageTracker:
         ancestors = common.get_page_as_ancestor(trash_ancestor)
 
         url = '%s/rest/api/content/%s' % (CONFLUENCE_API_URL, page_id)
-
-        session = requests.Session()
-        session.auth = (USERNAME, API_KEY)
-        session.headers.update({'Content-Type': 'application/json'})
-
         page_json = {
             "id": page_id,
             "type": "page",
@@ -171,8 +155,8 @@ class _ChildPageTracker:
             'ancestors': ancestors
         }
         LOGGER.debug("data: %s", json.dumps(page_json))
-        response = session.put(url, data=json.dumps(page_json))
-        response.raise_for_status()
+
+        common.make_request_put(url, data=json.dumps(page_json))
 
 
 CHILD_PAGES = _ChildPageTracker()

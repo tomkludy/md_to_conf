@@ -37,7 +37,6 @@ def convert_code_block(html):
 
             conf_ml = '<ac:structured-macro ac:name="code">'
             conf_ml = conf_ml + '<ac:parameter ac:name="theme">Midnight</ac:parameter>'
-            conf_ml = conf_ml + '<ac:parameter ac:name="linenumbers">true</ac:parameter>'
 
             lang = re.search('code class="(.*)"', tag)
             if lang:
@@ -46,6 +45,7 @@ def convert_code_block(html):
                 lang = 'none'
 
             conf_ml = conf_ml + '<ac:parameter ac:name="language">' + lang + '</ac:parameter>'
+            conf_ml = conf_ml + '<ac:parameter ac:name="linenumbers">true</ac:parameter>'
             content = re.search(r'<pre><code.*?>(.*?)</code></pre>', tag, re.DOTALL).group(1)
             content = '<ac:plain-text-body><![CDATA[' + content + ']]></ac:plain-text-body>'
             conf_ml = conf_ml + content + '</ac:structured-macro>'
@@ -184,6 +184,14 @@ def remove_collapsible_headings(read):
     read = read.replace('</details>', '')
     read = read.replace('<summary>', '')
     read = read.replace('</summary>', '')
+    return read
+
+
+def remove_empty_list_items(read):
+    """
+    Removes empty list items, which Confluence will strip out anyway
+    """
+    read = read.replace('<li></li>', '')
     return read
 
 

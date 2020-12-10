@@ -4,7 +4,6 @@
 # --------------------------------------------------------------------------------------------------
 """
 
-import sys
 import os
 import tempfile
 import re
@@ -13,7 +12,6 @@ import collections
 import mimetypes
 import urllib
 import urllib.parse
-import requests
 
 import common
 from file_api import FILE_API
@@ -21,8 +19,6 @@ from child_pages import CHILD_PAGES
 from page_cache import PAGE_CACHE
 
 from globals import LOGGER
-from globals import USERNAME
-from globals import API_KEY
 from globals import SPACE_KEY
 from globals import CONFLUENCE_API_URL
 from globals import SIMULATE
@@ -111,11 +107,6 @@ class _PageApi:
             LOGGER.info('Creating page %s...', title)
 
             url = '%s/rest/api/content/' % CONFLUENCE_API_URL
-
-            session = requests.Session()
-            session.auth = (USERNAME, API_KEY)
-            session.headers.update({'Content-Type': 'application/json'})
-
             new_page = {'type': 'page',
                         'title': title,
                         'space': {'key': SPACE_KEY},
@@ -127,38 +118,28 @@ class _PageApi:
                         },
                         'ancestors': ancestors
                        }
-
             LOGGER.debug("data: %s", json.dumps(new_page))
 
-            response = session.post(url, data=json.dumps(new_page))
-            try:
-                response.raise_for_status()
-            except requests.exceptions.HTTPError as excpt:
-                LOGGER.error("error: %s - %s", excpt, response.content)
-                exit(1)
+            response = common.make_request_post(url, data=json.dumps(new_page))
 
-            if response.status_code == 200:
-                data = response.json()
-                space_name = data[u'space'][u'name']
-                page_id = data[u'id']
-                version = data[u'version'][u'number']
-                link = '%s%s' % (CONFLUENCE_API_URL, data[u'_links'][u'webui'])
+            data = response.json()
+            space_name = data[u'space'][u'name']
+            page_id = data[u'id']
+            version = data[u'version'][u'number']
+            link = '%s%s' % (CONFLUENCE_API_URL, data[u'_links'][u'webui'])
 
-                LOGGER.info('Page created in %s with ID: %s.', space_name, page_id)
-                LOGGER.info('URL: %s', link)
+            LOGGER.info('Page created in %s with ID: %s.', space_name, page_id)
+            LOGGER.info('URL: %s', link)
 
-                # label the page
-                self.__label_page(page_id)
+            # label the page
+            self.__label_page(page_id)
 
-                img_check = re.search(r'<img(.*?)\/>', body)
-                if img_check:
-                    LOGGER.info('Attachments found, update procedure called.')
-                    return self.update_page(page_id, title, body, version, ancestors, filepath)
-                else:
-                    return page_id
+            img_check = re.search(r'<img(.*?)\/>', body)
+            if img_check:
+                LOGGER.info('Attachments found, update procedure called.')
+                return self.update_page(page_id, title, body, version, ancestors, filepath)
             else:
-                LOGGER.error('Could not create page.')
-                sys.exit(1)
+                return page_id
 
 
     def update_page(self, page_id, title, body, version, ancestors, filepath):
@@ -173,18 +154,32 @@ class _PageApi:
         :param filepath: markdown file full path
         :return: updated page id
         """
-        LOGGER.info('Updating page...')
-        PAGE_CACHE.forget_page(title)
+        LOGGER.info('Updating page %s...', title)
 
         # Add images and attachments
         body = self.__add_images(page_id, body, filepath)
 
+        # See if the page actually needs to be updated or not
+        existing = PAGE_CACHE.get_page(title)
+        if existing:
+            if  title == existing.title and \
+                body == existing.body and \
+                ancestors[0]['id'] == existing.ancestor:
+                LOGGER.info('No changes on the page; update not necessary')
+                return page_id
+            else:
+                LOGGER.info('Changes detected; update nessary')
+                if title != existing.title:
+                    LOGGER.debug('update required: title %s != %s', title, existing.title)
+                if body != existing.body:
+                    LOGGER.debug('update required: body %s != %s', body, existing.body)
+                if ancestors[0]['id'] != existing.ancestor:
+                    LOGGER.debug('update required: ancestor %s != %s',
+                                 ancestors[0]['id'], existing.ancestor)
+
+        PAGE_CACHE.forget_page(title)
+
         url = '%s/rest/api/content/%s' % (CONFLUENCE_API_URL, page_id)
-
-        session = requests.Session()
-        session.auth = (USERNAME, API_KEY)
-        session.headers.update({'Content-Type': 'application/json'})
-
         page_json = {
             "id": page_id,
             "type": "page",
@@ -203,18 +198,14 @@ class _PageApi:
             'ancestors': ancestors
         }
 
-        response = session.put(url, data=json.dumps(page_json))
-        response.raise_for_status()
+        response = common.make_request_put(url, data=json.dumps(page_json))
 
-        if response.status_code == 200:
-            data = response.json()
-            link = '%s%s' % (CONFLUENCE_API_URL, data[u'_links'][u'webui'])
+        data = response.json()
+        link = '%s%s' % (CONFLUENCE_API_URL, data[u'_links'][u'webui'])
 
-            LOGGER.info("Page updated successfully.")
-            LOGGER.info('URL: %s', link)
-            return data[u'id']
-        else:
-            LOGGER.error("Page could not be updated.")
+        LOGGER.info("Page updated successfully.")
+        LOGGER.info('URL: %s', link)
+        return data[u'id']
 
 
     def __label_page(self, page_id):
@@ -222,17 +213,11 @@ class _PageApi:
         Attach a label to the page to indicate it was auto-generated
         """
         LOGGER.info("Labeling page %s", page_id)
-        session = requests.Session()
-        session.auth = (USERNAME, API_KEY)
-        session.headers.update({'Content-Type': 'application/json'})
 
         url = '%s/rest/api/content/%s/label' % (CONFLUENCE_API_URL, page_id)
-
         page_json = [{ "name": "md_to_conf" }]
 
-        response = session.post(url, data=json.dumps(page_json))
-        response.raise_for_status()
-
+        common.make_request_post(url, data=json.dumps(page_json))
 
 
     def __get_attachment(self, page_id, filename):
@@ -243,20 +228,27 @@ class _PageApi:
         :param filename: attachment filename
         :return: attachment info in case of success, False otherwise
         """
-        url = '%s/rest/api/content/%s/child/attachment?filename=%s' % \
-            (CONFLUENCE_API_URL, page_id, filename)
+        url = '%s/rest/api/content/%s/child/attachment?filename=%s' \
+              '&expand=metadata.properties.hash' \
+              % (CONFLUENCE_API_URL, page_id, filename)
 
-        session = requests.Session()
-        session.auth = (USERNAME, API_KEY)
-
-        response = session.get(url)
-        response.raise_for_status()
+        response = common.make_request_get(url)
         data = response.json()
+        LOGGER.debug('data: %s', str(data))
 
         if len(data[u'results']) >= 1:
-            att_id = data[u'results'][0]['id']
-            att_info = collections.namedtuple('AttachmentInfo', ['id'])
-            attr_info = att_info(att_id)
+            data = data[u'results'][0]
+            att_id = data[u'id']
+
+            att_hash = None
+            props = data[u'metadata'][u'properties']
+            if u'hash' in props:
+                hash_prop = props[u'hash'][u'value']
+                if u'sha256' in hash_prop:
+                    att_hash = hash_prop[u'sha256']
+
+            att_info = collections.namedtuple('AttachmentInfo', ['id', 'hash'])
+            attr_info = att_info(att_id, att_hash)
             return attr_info
 
         return False
@@ -281,6 +273,8 @@ class _PageApi:
             LOGGER.error('File %s cannot be found --> skip ', file)
             return False
 
+        sha = FILE_API.get_sha_hash(file)
+
         file_to_upload = {
             'comment': comment,
             'file': (filename, open(file, 'rb'), content_type, {'Expires': '0'})
@@ -288,19 +282,56 @@ class _PageApi:
 
         attachment = self.__get_attachment(page_id, filename)
         if attachment:
+            if sha == attachment.hash:
+                LOGGER.info('File %s has not changed --> skip', file)
+                return True
+            else:
+                LOGGER.debug('File %s has changed', file)
+
             url = '%s/rest/api/content/%s/child/attachment/%s/data' % \
                 (CONFLUENCE_API_URL, page_id, attachment.id)
         else:
+            LOGGER.debug('File %s is new', file)
             url = '%s/rest/api/content/%s/child/attachment/' % (CONFLUENCE_API_URL, page_id)
 
-        session = requests.Session()
-        session.auth = (USERNAME, API_KEY)
-        session.headers.update({'X-Atlassian-Token': 'no-check'})
-
         LOGGER.info('Uploading attachment %s...', filename)
+        response = common.make_request_upload(url, file_to_upload)
 
-        response = session.post(url, files=file_to_upload)
-        response.raise_for_status()
+        data = response.json()
+        LOGGER.debug('data: %s', str(data))
+
+        # depending on create or update, sometimes you get a collection
+        # and sometimes you get a single item
+        if u'results' in data:
+            data = data[u'results'][0]
+
+        attachment_id = data['id']
+
+        # Set the SHA hash metadata on the attachment so that it can be later compared
+
+        # first, get the current version of the property if it exists
+        url = '%s/rest/api/content/%s/property/hash' % (CONFLUENCE_API_URL, attachment_id)
+        response = common.make_request_get(url, False)
+
+        if response.status_code == 200:
+            data = response.json()
+            LOGGER.debug('data: %s', str(data))
+            version = data[u'version'][u'number']
+        else:
+            version = 0
+
+        # then set the hash propery
+        page_json = {
+            "value": {
+                "sha256": sha
+            },
+            "version": {
+                "number": version + 1,
+                "minorEdit": True
+            }
+        }
+        LOGGER.debug('data: %s', json.dumps(page_json))
+        response = common.make_request_put(url, data=json.dumps(page_json))
 
         return True
 
