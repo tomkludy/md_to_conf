@@ -9,6 +9,8 @@ import os
 
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
 from globals import LOGGER
 from globals import LOG_FILE
@@ -37,12 +39,21 @@ def check_for_errors(response):
         sys.exit(1)
 
 
+def _session():
+    session = requests.Session()
+    retry = Retry(connect=3, backoff_factor=0.5)
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    session.auth = (USERNAME, API_KEY)
+    return session
+
+
 def _make_request(callback, check_response = True):
     """
     Make a request
     """
-    session = requests.Session()
-    session.auth = (USERNAME, API_KEY)
+    session = _session()
     session.headers.update({'Content-Type': 'application/json'})
     response = callback(session)
 
@@ -54,6 +65,8 @@ def _make_request(callback, check_response = True):
         response = callback(session)
 
     if check_response:
+        if response.status_code >= 400:
+            LOGGER.error('Error Response Content: %s', response.content)
         response.raise_for_status()
 
     return response
@@ -87,8 +100,7 @@ def make_request_upload(url, file_to_upload):
     # this is different enough from the normal make_request
     # that factoring out the commonalities makes it hard
     # to follow the logic; I preferred to just duplicate
-    session = requests.Session()
-    session.auth = (USERNAME, API_KEY)
+    session = _session()
     session.headers.update({'X-Atlassian-Token': 'no-check'})
     response = session.post(url, files=file_to_upload)
 
@@ -99,6 +111,8 @@ def make_request_upload(url, file_to_upload):
         time.sleep(1)
         response = session.post(url, files=file_to_upload)
 
+    if response.status_code >= 400:
+        LOGGER.error('Error Response Content: %s', response.content)
     response.raise_for_status()
     return response
 
